@@ -1,0 +1,24 @@
+# Data folders
+data/
+data_ready/
+ERA5_dyn_data_ready/
+
+# Outputs
+maps/
+regression_maps/
+regression_maps_U850/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Python cache
+__pycache__/
+*.pyc
+/*.nc
+/*.csv
+/.cdsapirc
+/Anaconda3-2023.09-0-Linux-x86_64.sh
+/Test.ipynb
+/U500
+/V500
+/download_ERA5_data.ipynb
