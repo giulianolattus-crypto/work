@@ -1,8 +1,11 @@
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from whole_period_effects.Functions import modified_colorbar
 import xarray as xr
 import matplotlib.pyplot as plt
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 
 
 # =========================================================
@@ -284,10 +287,10 @@ class ClimateVariable:
     # =====================================================
 
     def gapfill_station(
-    self,
-    min_cal_points=30,
-    r2_threshold=None,
-    pval_threshold=0.05
+        self,
+        min_cal_points=30,
+        r2_threshold=None,
+        pval_threshold=0.05
     ):
 
         ds = self.ds_clean.copy()
@@ -297,10 +300,12 @@ class ClimateVariable:
         n_stations = ds.sizes['points']
 
         prev_day = ds[self.var_name].shift(time=1)
-
         next_day = ds[self.var_name].shift(time=-1)
 
         filled_total = 0
+
+        filled_per_station = np.zeros(n_stations, dtype=int)
+        missing_idx_per_station = np.zeros(n_stations, dtype=int)
 
         for target in range(n_stations):
 
@@ -320,7 +325,15 @@ class ClimateVariable:
                 if np.all(~np.isnan(y)):
                     continue
 
-                # predictors
+                missing_idx = np.where(np.isnan(y))[0]
+
+                # accumulate over all months
+                missing_idx_per_station[target] += len(missing_idx)
+
+                # =====================================================
+                # PREDICTORS
+                # =====================================================
+
                 X_list = []
 
                 x_prev = (
@@ -366,11 +379,9 @@ class ClimateVariable:
                     continue
 
                 y_cal = y[valid_cal]
-
                 X_cal = X[valid_cal, :]
 
                 X_clean = []
-
                 good_cols = []
 
                 for k in range(X_cal.shape[1]):
@@ -378,7 +389,6 @@ class ClimateVariable:
                     if not np.isnan(X_cal[:, k]).any():
 
                         X_clean.append(X_cal[:, k])
-
                         good_cols.append(k)
 
                 if len(X_clean) == 0:
@@ -386,9 +396,11 @@ class ClimateVariable:
 
                 X_clean = np.column_stack(X_clean)
 
+                # =====================================================
                 # STEPWISE SELECTION
-                selected = []
+                # =====================================================
 
+                selected = []
                 remaining = list(range(X_clean.shape[1]))
 
                 while remaining:
@@ -410,6 +422,7 @@ class ClimateVariable:
                             worst_p = np.max(model.pvalues[1:])
 
                             if worst_p < best_p:
+
                                 best_p = worst_p
                                 best_var = var
 
@@ -422,7 +435,6 @@ class ClimateVariable:
                     ):
 
                         selected.append(best_var)
-
                         remaining.remove(best_var)
 
                     else:
@@ -438,13 +450,17 @@ class ClimateVariable:
 
                 r2 = final_model.rsquared
 
-                # APPLY FIXED THRESHOLD
-                if r2 < r2_threshold:
+                if (
+                    r2_threshold is not None
+                    and r2 < r2_threshold
+                ):
                     continue
 
-                missing_idx = np.where(np.isnan(y))[0]
-
                 time_index = np.where(mask)[0]
+
+                # =====================================================
+                # FILL MISSING VALUES
+                # =====================================================
 
                 for idx in missing_idx:
 
@@ -485,15 +501,114 @@ class ClimateVariable:
                         ] = y_pred
 
                         filled_total += 1
+                        filled_per_station[target] += 1
 
                     except Exception:
                         continue
 
+        # =====================================================
+        # SAVE FILLED DATASET
+        # =====================================================
+
         self.ds_filled = ds
+
+        # =====================================================
+        # COMPUTE FRACTION OF GAPS FILLED
+        # =====================================================
+
+        gapfill_fraction = np.divide(
+            filled_per_station,
+            missing_idx_per_station,
+            out=np.zeros_like(
+                filled_per_station,
+                dtype=float
+            ),
+            where=missing_idx_per_station != 0
+        )
+
+        self.filled_per_station = xr.DataArray(
+            gapfill_fraction,
+            dims="points",
+            coords={
+                "points": ds["points"].values,
+                "lat": ("points", ds["lat"].values),
+                "lon": ("points", ds["lon"].values),
+            },
+            name="gapfill_fraction"
+        )
+
+        # =====================================================
+        # SANITY CHECKS
+        # =====================================================
+
+        if np.any(gapfill_fraction > 1):
+
+            bad = np.where(gapfill_fraction > 1)[0]
+
+            raise ValueError(
+                f"Gapfill fraction > 1 for stations {bad}"
+            )
+
+        if np.any(
+            (missing_idx_per_station == 0)
+            & (filled_per_station > 0)
+        ):
+
+            bad = np.where(
+                (missing_idx_per_station == 0)
+                & (filled_per_station > 0)
+            )[0]
+
+            raise ValueError(
+                f"Stations {bad} were filled despite having no missing values."
+            )
 
         print(f"\nTotal values filled: {filled_total}")
 
-        return ds
+        print(
+            f"Mean station fill fraction: "
+            f"{100*np.nanmean(gapfill_fraction):.1f}%"
+        )
+
+        print(
+            f"Maximum station fill fraction: "
+            f"{100*np.nanmax(gapfill_fraction):.1f}%"
+        )
+
+        return ds, self.filled_per_station
+
+    def plot_gapfill_from_station_result(self):
+
+        data = self.filled_per_station  # already xarray DataArray
+
+        fig = plt.figure(figsize=(10, 8))
+        ax = plt.axes(projection=ccrs.PlateCarree())
+
+        ax.add_feature(cfeature.COASTLINE)
+        ax.add_feature(cfeature.BORDERS)
+        ax.add_feature(cfeature.LAND, facecolor="lightgray")
+        ax.add_feature(cfeature.OCEAN, facecolor="white")
+
+        sc = ax.scatter(
+            data.lon,
+            data.lat,
+            c=data,
+            cmap="YlOrRd",
+            s=80,
+            edgecolor="k",
+            vmin=0,
+            vmax=1,   # because it's a fraction now
+            transform=ccrs.PlateCarree()
+        )
+
+        cbar = plt.colorbar(sc, ax=ax)
+        cbar.set_label("Fraction of missing values filled")
+
+        ax.set_title(f"{self.var_name}: Gap-fill performance per station")
+
+        plt.tight_layout()
+        plt.savefig(f"Obs_data_ready/{self.var_name}_gapfill_density.png", dpi=300)
+
     
 
 
@@ -519,6 +634,7 @@ class PrecipitationData(ClimateVariable):
 
 class TemperatureData(ClimateVariable):
 
+    ##eehh this is not necessary
     def preprocess(self):
 
         self.ds[self.var_name] = (
@@ -550,8 +666,6 @@ temperature=TemperatureData(
 
 print('Input data loaded')
 
-# workflow
-# PRECIPITATION
 precip.load_cr2()
 precip.preprocess()
 precip.select_data()
@@ -562,12 +676,17 @@ precip.gapfill_station(
     r2_threshold=0.9
 )
 
+precip.plot_gapfill_from_station_result()
+
+precip.ds.to_netcdf("Obs_data_ready/obs_data_precip_gapfilled.nc")
+precip.filled_per_station.to_netcdf("Obs_data_ready/obs_data_precip_filled_per_station.nc")
+
 print("Precipitation processing completed successfully")
 
 
 # TEMPERATURE
 temperature.load_cr2()
-temperature.preprocess()
+#temperature.preprocess()
 temperature.select_data()
 temperature.compute_anomaly()
 temperature.apply_qc()
@@ -575,5 +694,9 @@ temperature.apply_qc()
 temperature.gapfill_station(
     r2_threshold=0.8
 )
+temperature.plot_gapfill_from_station_result()
+
+temperature.ds.to_netcdf("Obs_data_ready/obs_data_temp_gapfilled.nc")
+temperature.filled_per_station.to_netcdf("Obs_data_ready/obs_data_temp_filled_per_station.nc")
 
 print("Temperature processing completed successfully")
