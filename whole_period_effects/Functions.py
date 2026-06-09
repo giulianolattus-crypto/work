@@ -16,6 +16,112 @@ from cartopy.util import add_cyclic_point
 from matplotlib.colors import TwoSlopeNorm
 import cartopy.feature as cfeature
 
+###################################################################################################
+##Data preparation
+####################################################################################################
+def seasonal_average(da):
+    da2=da.groupby('time.year').mean('time')
+    return(da2)
+
+def stdize_ssavg(da):
+    da2=(da-da.mean())/da.std()
+    return da2
+
+def extract_seasonal_data(array, seasons):
+    """
+    Extract data from the array for specific seasons (months).
+    - A subset of the original array with only the data for the specified months.
+    """
+    # Make sure the 'time' dimension has a 'month' coordinate
+    if 'time' in array.coords:
+        # Extract month from the 'time' dimension
+        months = array['time'].dt.month
+        
+        # Filter based on the provided seasons (months)
+        seasonal_data = array.sel(time=months.isin(seasons))
+        
+        return seasonal_data
+    else:
+        raise ValueError("The input array does not contain a 'time' dimension.")
+        
+def compute_anomaly(array):
+    climatology = array.groupby('time.month').mean(
+        dim='time',
+        skipna=True
+    )
+
+    anomaly = array.groupby('time.month') - climatology
+
+    return anomaly
+
+def shift_december(da):
+    time_df = pd.to_datetime(da['time'])
+    # Create a boolean mask for times in December
+    time_series=pd.Series(time_df)
+    mask = time_series.dt.month == 12
+    time_series.loc[mask] = time_series.loc[mask] + pd.DateOffset(years=1)
+    # Convert to numpy datetime64[D]
+    time_df_upd = time_series.values.astype('datetime64[D]')
+    #display(time_df_upd)
+    d={'time':time_df_upd}
+    da_new=da.assign_coords(d)
+    return da_new
+
+def weight_by_latitude(da):
+    """Weight data array by cosine of latitude."""
+    weights = np.cos(np.deg2rad(da['lat']))
+    weighted_da = da * weights
+    return weighted_da
+
+def sea_mask(da):
+    landsea_mask=xr.open_dataset('~/work/landseamask.nc') # mask values 0 (sea) or 1 (land)
+    landsea_mask_interp = landsea_mask['mask'].interp(
+    lat=da.lat,
+    lon=da.lon,
+    method='nearest') ##map my mask 0.5° on my 0.25° grid
+    #print(landsea_mask.sel(lat=-32.25,lon=-50.25)['mask'].values)
+    
+    masked_da=da.where(landsea_mask_interp==1)
+    return masked_da
+
+####################################################################################################
+#combined function for data prep
+def var_prepper(da, months_list, wghts_bool=True):
+    ##1 Anomalies
+    da_an=compute_anomaly(da)
+    #print(da_an)
+    ##2 detrending
+    p = da_an.polyfit(dim='time', deg=1, skipna=True)
+    coeffs = p[list(p.data_vars)[0]]   # or p.t2m_polyfit_coefficients
+    t_fit = xr.polyval(da_an['time'], coeffs)
+    da_detr=da_an - t_fit
+    #print(da_detr)
+    ##3 weight by latitude (if necessary)
+    if wghts_bool==True:
+        da_wght=weight_by_latitude(da_detr)
+    else:
+        da_wght=da_detr
+    ##4 extract seasonal data and standardise it again
+    da_season=extract_seasonal_data(da_wght,months_list)
+    #print(da_season)
+    if 12 in months_list:
+        da_season_mean=stdize_ssavg(seasonal_average(shift_december(da_season)))
+    else: 
+        da_season_mean=stdize_ssavg(seasonal_average((da_season)))
+        
+    ##5 mask the ocean
+    da_masked=sea_mask(da_season_mean)
+    print(da_masked)
+    return da_masked
+
+####################################################################################################
+def df_xr_prep(df):
+    da=df.to_xarray()
+    da=da.rename({'index':'year'})
+    return da
+
+#######################################################################################################
+
 def construct_da_x_year_fix(ds, size=30):
     ##this is a very confusing method, but I trust that it works...
     ds_roll=ds.rolling(year=size, center=False).construct("window")
@@ -25,7 +131,8 @@ def construct_da_x_year_fix(ds, size=30):
 
 
 ###################################################################################################
-
+##Regression stuff/Causal Link Quantification
+###################################################################################################
 def lin_model_fast(y, x_main, *x_controls):
     """
     y         : (window,)
@@ -172,7 +279,7 @@ def conditioning_everything_fast(ds, driver_list, target, total_eff=False, whole
 
 ####################################################################################################
 ##Plotting functions
-
+#####################################################################################################
 
 def modified_colorbar(cmap, levels, center_zero=True):
     n = len(levels) - 1
@@ -186,6 +293,7 @@ def modified_colorbar(cmap, levels, center_zero=True):
             colors[mid] = np.array([1, 1, 1, 1])  # white
     
     return mcolors.ListedColormap(colors)
+
 
 ##########################################################################################
 def plot_map(
@@ -217,7 +325,9 @@ def plot_map(
     # Extract coordinates
     lat = da.lat.values
     lon = da.lon.values
-    arr = da.values
+    
+    arr = da.values.astype(float)
+    arr = np.clip(arr, -max_abs, max_abs)
 
     # Create axis with PlateCarree projection
     ax = fig.add_subplot(1, subplts_num, i, projection=ccrs.PlateCarree())
@@ -408,7 +518,8 @@ def plot_map_circ(
     # Extract coordinates
     lat = da.lat.values
     lon = da.lon.values
-    arr = da.values
+    arr = da.values.astype(float)
+    
 
     # Create axis with PlateCarree projection
     ax = fig.add_subplot(subplts_num, 1, i, projection=ccrs.PlateCarree(central_longitude=-130)) 
@@ -491,8 +602,7 @@ def subplots_map_circ(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', ste
     fig.subplots_adjust(top=0.8)
     
     for j, da in enumerate(ds):
-        
-        cs=plot_map( #get the colorbar for each subplot
+        cs=plot_map_circ( #get the colorbar for each subplot
         i=j+1,
         da=da,
         pval=None,
