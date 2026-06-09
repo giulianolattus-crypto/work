@@ -1,3 +1,5 @@
 nohup: Eingabe wird ignoriert
 /home/glattus/work/obs_data_prep_pareto_use_classes.py:302: FutureWarning: The return type of `Dataset.dims` will be changed to return a set of dimension names in future, in order to be more consistent with `DataArray.dims`. To access a mapping from dimension names to lengths, please use `Dataset.sizes`.
   n_stations = ds.dims['points']
+/home/glattus/anaconda3/envs/climate/lib/python3.10/site-packages/statsmodels/regression/linear_model.py:1782: RuntimeWarning: divide by zero encountered in scalar divide
+  return 1 - self.ssr/self.centered_tss
