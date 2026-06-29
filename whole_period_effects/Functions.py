@@ -309,6 +309,7 @@ def plot_map(
     pval=None,
     fontsize=14,
     smooth=False,
+    max_abs=None,
     stations=None
 ):
     """
@@ -327,7 +328,8 @@ def plot_map(
     lon = da.lon.values
     
     arr = da.values.astype(float)
-    arr = np.clip(arr, -max_abs, max_abs)
+    if max_abs!=None:
+        arr = np.clip(arr, -max_abs, max_abs)
 
     # Create axis with PlateCarree projection
     ax = fig.add_subplot(1, subplts_num, i, projection=ccrs.PlateCarree())
@@ -342,7 +344,7 @@ def plot_map(
         vmax = np.nanmax(np.abs(arr))
         if stations is not None:
             station_max=np.nanmax(np.abs(stations))
-            global_max=np.max(vmax, station_max)
+            global_max=np.max([vmax, station_max])
     else:
         vmax=cbar_each
     if levels is None:
@@ -391,8 +393,8 @@ def plot_map(
     if stations is not None:
         # 2. Skalierung berechnen
         amps=stations.values
-        min_amp = min(amps)
-        max_amp = max(amps)
+        min_amp = np.nanmin(amps)
+        max_amp = np.nanmax(amps)
         min_size = 20  # Kleinster Durchmesser in Punkt
         max_size = 150 # Größter Durchmesser in Punkt
 
@@ -406,22 +408,30 @@ def plot_map(
                 sizes.append(min_size + (max_size - min_size) * normalized)
 
         # 4. Kreise plotten
-        ax.scatter(stations.lon, stations.lat, s=sizes, c='blue', edgecolors='black', alpha=0.6, 
+        sc=ax.scatter(stations.lon, stations.lat, s=sizes, c=amps,cmap=cmap_mod, norm=norm,\
+                   edgecolors='black', 
                 transform=ccrs.PlateCarree(), label='Stations')
     
-    return cs
+    return cs, sc
 
 ###############################################################################################
 #         
 def subplots_map(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.1, \
-                 cbar_each=None, heading=None, global_max_val=0.0):
+                 cbar_each=None, heading=None, global_max_val=0.0, stations=None):
     cs_list=[]
     fontsize=16
     
     global_max=0
-    for da in ds:
+    for i, da in enumerate(ds):
         local_max = np.nanmax(np.abs(da.values))
-        global_max = max(global_max, local_max)
+        if stations is not None:
+            local_obs_max=np.nanmax(np.abs(stations[i].values))
+            if local_obs_max>2.*local_max:
+                global_max=max(global_max, local_max)
+            else:
+                global_max=max(global_max, local_max, local_obs_max)
+        else:
+            global_max = max(global_max, local_max)
     if global_max<global_max_val: #if the global max is lower than the provided levels, we need to adjust them
         global_max=global_max_val
         
@@ -457,7 +467,9 @@ def subplots_map(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.
         cmap=cmap,
         levels=levels,
         smooth=False,
-        fontsize=fontsize)
+        fontsize=fontsize,
+        stations=stations[j], 
+        max_abs=max_abs)
         
         cs_list.append(cs)
     
