@@ -361,6 +361,34 @@ DJF_mean = DJF.mean(dim="season_month")
 ###############################################################
 #DATA PREPARATION
 #################################################################
+def select_region(ds, lat_min, lat_max, lon_min, lon_max):
+    """
+    Select a latitude-longitude box.
+
+    Works even if latitude is ordered north-to-south, as in ERA5/SEAS5:
+        90, 89, 88, ..., -90
+
+    Longitude in your dataset is 0 to 360.
+    So:
+        -76 to -70 becomes 284 to 290
+        -62 to -49 becomes 298 to 311
+    """
+
+    lat = ds["latitude"]
+
+    # If latitude is decreasing: 90, 89, ..., -90
+    if lat[0] > lat[-1]:
+        lat_slice = slice(lat_max, lat_min)
+    else:
+        lat_slice = slice(lat_min, lat_max)
+
+    out = ds.sel(
+        latitude=lat_slice,
+        longitude=slice(lon_min, lon_max)
+    )
+
+    return out
+
 def compute_sample_anomaly(ds):
     """
     Compute anomaly across all samples.
@@ -542,7 +570,8 @@ def IOD_process(sst):
     print('IOD index computed')
     return iod_index_ssavg
 
-
+################################################################
+#Start ENSO and IOD comp
 
 sst_SON=SON_mean[['sst']]
 sst_DJF=DJF_mean[['sst']]
@@ -560,6 +589,12 @@ ds_ocean_SON=ds_ocean_SON.reset_index('sample')
 encoding_ocean = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_SON.data_vars}
 ds_ocean_SON.to_netcdf(save_path+save_folder+'/ENSO_IOD_SON.nc', encoding=encoding_ocean)
 print('Spring data saved!')
+
+
+
+#####################################################################
+#Additional functions for summer indian ocean mode comp
+#####################################################################
 
 def plot_eof1(Vt, X_2d, title="EOF1 pattern"):
     eof1 = Vt[0, :]
@@ -610,6 +645,15 @@ def IOBW_process(sst):
     X_2d = X_2d.transpose("sample", "space")
     X_2d = X_2d.fillna(np.nanmean(X_2d))
 
+
+    print('Safety checks!')
+    print("Shape:", X_2d.shape)
+    print("Size (GB):", X_2d.nbytes / 1024**3)  
+    print("Finite:", np.isfinite(X_2d).all())
+    print("NaNs:", np.isnan(X_2d).sum())
+    print("Infs:", np.isinf(X_2d).sum())
+    
+    
     print("Performing PCA...")
 
     # 7. SVD / PCA
@@ -647,3 +691,5 @@ ds_ocean_DJF=xr.merge([IOBW_index, nino_DJF])
 ds_ocean_DJF=ds_ocean_DJF.reset_index('sample')
 encoding_ocean_DJF = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_DJF.data_vars}
 ds_ocean_DJF.to_netcdf(save_path+save_folder+'/ENSO_IOB_DJF.nc', encoding=encoding_ocean_DJF)
+
+print('Summer data saved!')

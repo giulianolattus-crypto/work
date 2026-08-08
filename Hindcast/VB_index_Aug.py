@@ -1,15 +1,33 @@
-def prepare_u60S(u):
-    u_zonal = u.mean(dim="longitude")
-    u_60S = u_zonal.interp(latitude=-60)
-
-    if "pressure_level" in u_60S.dims:
-        u_60S = u_60S.squeeze("pressure_level", drop=True)
-
-    return u_60S
+import numpy as np
+import pandas as pd
+import xarray as xr
 
 
-def smooth_forecast_period(u_60S, window=5):
-    return u_60S.rolling(forecast_period=window, center=True).mean()
+DATADIR = "/climca/data/SEAS5_SA/data"
+
+ds = xr.open_dataset(
+    DATADIR + "/seas5_daily_u_component_wind_50hPa_AugInit.nc"
+    , decode_cf=False
+    ,
+    chunks={
+        "number": 1,
+        "forecast_reference_time": 10,
+        "forecast_period": -1,
+    }
+)
+
+u = ds
+
+# keep October-Jan forecast window:
+# 1440 h = 60 days
+# 3600 h = 150 days
+#u = u.sel(
+#    forecast_period=slice(
+#        np.timedelta64(1440, "h"),
+#        np.timedelta64(3600, "h"),
+#    )
+#)
+
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -18,6 +36,7 @@ DATADIR = "/climca/data/SEAS5_SA/data"
 
 ds = xr.open_dataset(
     DATADIR + "/seas5_daily_u_component_wind_50hPa_AugInit.nc",
+    decode_cf=False,
     chunks={
         "number": 1,
         "forecast_reference_time": 10,
@@ -25,15 +44,46 @@ ds = xr.open_dataset(
     }
 )
 
-u = ds["u"]
+from xarray.coding.times import decode_cf_datetime
 
-# keep October-Jan forecast window:
+# Decode forecast_reference_time
+forecast_reference_time_decoded = decode_cf_datetime(
+    ds["forecast_reference_time"].values,
+    units=ds["forecast_reference_time"].attrs["units"],
+    calendar=ds["forecast_reference_time"].attrs.get("calendar", "standard"),
+)
+
+u = ds['u'].assign_coords(
+    forecast_reference_time=(
+        ds["forecast_reference_time"].dims,
+        forecast_reference_time_decoded
+    )
+)
+
+# Decode valid_time
+valid_time_decoded = xr.coding.times.decode_cf_datetime(
+    ds["valid_time"].values,
+    units=ds["valid_time"].attrs["units"],
+    calendar=ds["valid_time"].attrs.get("calendar", "standard"),
+)
+
+u = u.assign_coords(
+    valid_time=(
+        ds["valid_time"].dims,
+        valid_time_decoded
+    )
+)
+
+# ---------------------------------------------------------
+# Keep October-January forecast window
+# forecast_period is already numeric hours
 # 1440 h = 60 days
 # 3600 h = 150 days
+# ---------------------------------------------------------
 u = u.sel(
     forecast_period=slice(
-        np.timedelta64(1440, "h"),
-        np.timedelta64(3600, "h"),
+        1440.0,
+        3600.0
     )
 )
 
@@ -45,7 +95,6 @@ def prepare_u60S(u):
         u_60S = u_60S.squeeze("pressure_level", drop=True)
 
     return u_60S
-
 
 def smooth_forecast_period(u_60S, window=5):
     return u_60S.rolling(forecast_period=window, center=True).mean()
@@ -132,7 +181,7 @@ df = breakdown_doy_aug.to_dataframe(name="VB_DOY").reset_index()
 df["latitude"] = -60
 
 df.to_csv(
-    "/home/jmindlin/work/Hindcast/SEAS5_VortexBreakdown_DOY_Aug.csv",
+    "/climca/people/glattus/Hindcast_data_ready/SEAS5_VortexBreakdown_DOY_Aug.csv",
     index=False,
 )
 

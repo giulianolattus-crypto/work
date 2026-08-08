@@ -2,11 +2,14 @@
 data/
 data_ready/
 ERA5_dyn_data_ready/
+Obs_data_ready/
 
 # Outputs
 maps/
 regression_maps/
 regression_maps_U850/
+Hindcast/Model_eval_plots/
+Hindcast/Index_comp
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
@@ -16,6 +19,9 @@ __pycache__/
 *.pyc
 /*.nc
 /*.csv
+/*.log
+/*.jpg
+/*png
 /.cdsapirc
 /Anaconda3-2023.09-0-Linux-x86_64.sh
 /Test.ipynb

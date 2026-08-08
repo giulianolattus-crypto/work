@@ -272,9 +272,28 @@ def SAM_process_fast(zg):
     X = X - np.nanmean(X, axis=0, keepdims=True)
     X = np.nan_to_num(X, nan=0.0)
 
+    print('Safety checks!')
+    print("Shape:", X.shape)
+    print("Size (GB):", X.nbytes / 1024**3)
+    print("Finite:", np.isfinite(X).all())
+    print("NaNs:", np.isnan(X).sum())
+    print("Infs:", np.isinf(X).sum())
+
     print("Performing PCA...")
 
-    U, S, Vt = np.linalg.svd(X, full_matrices=False)
+    #U, S, Vt = np.linalg.svd(X, full_matrices=False)
+    from scipy.sparse.linalg import svds
+
+    k = 2   # number of EOFs you need
+
+    U, S, Vt = svds(X, k=k)
+
+    # svds returns smallest singular values first
+    idx = np.argsort(S)[::-1]
+
+    U = U[:, idx]
+    S = S[idx]
+    Vt = Vt[idx, :]
 
     SAM = plot_first_principal_component(reshaped_field_anom, Vt)
 
@@ -287,17 +306,18 @@ def SAM_process_fast(zg):
 
     SAM_asym_coefficient = regress_onto_zonal_mean_map(field_anom_seasonal, SAM_asym)
     # plot_regression_coefficients(field_anom_seasonal["sample"], SAM_asym_coefficient)
-
+    print('S-SAM and A-SAM separated!')
+    
     A_SAM_da = xr.DataArray(
         SAM_asym_coefficient,
-        coords={"sample": field_anom_seasonal["sample"].values},
+        coords={"sample": field_anom_seasonal["sample"]},
         dims=["sample"],
         name="A_SAM"
     )
 
     S_SAM_da = xr.DataArray(
         SAM_sym_coefficient,
-        coords={"sample": field_anom_seasonal["sample"].values},
+        coords={"sample": field_anom_seasonal["sample"]},
         dims=["sample"],
         name="S_SAM"
     )
@@ -361,8 +381,9 @@ def make_valid_time(ds):
 ##load data
 DATADIR='/climca/data/SEAS5_SA/data'
 
-z500_data=xr.open_dataset(DATADIR+'/seas5_pressure_levels_06-12month_1-6leadtimemonth.nc', 
-                          chunks={'number':1, 'forecast_reference_time':10, 'forecastMonth':6})
+z500_data=xr.open_dataset(DATADIR+'/seas5_pressure_levels_06-12month_1-6leadtimemonth.nc')
+
+z500_data=z500_data.chunk(chunks={'number':1, 'forecast_reference_time':10, 'forecastMonth':6})
 
 z500_data=make_valid_time(z500_data)
 
@@ -482,36 +503,61 @@ SON_z500 = z500_data_3m.where(z500_data_3m["season"] == "SON", drop=True)
 DJF_z500 = z500_data_3m.where(z500_data_3m["season"] == "DJF", drop=True)
 
 
-
-
-#Start SAM computation
+#Start SAM computation for spring
 SAM_dict_SON=SAM_process_fast(SON_z500)
-SAM_dict_DJF=SAM_process_fast(DJF_z500)
+
+print('Plot results!')
+
+
+SAM_ds_SON=xr.merge([SAM_dict_SON['SAM_sym_coefficient'], SAM_dict_SON['SAM_asym_coefficient']])
+
+SAM_ds_SON=standardize(SAM_ds_SON)
 
 #Plot both indices to check
 figure=plt.figure(figsize=(10, 5))
-plt.plot(SAM_dict_SON['SAM_sym_coefficient'].values, label='S-SAM')
-plt.plot(SAM_dict_SON['SAM_asym_coefficient'].values, label='A-SAM')
+plt.plot(SAM_ds_SON['S_SAM'].values, label='S-SAM')
+plt.plot(SAM_ds_SON['A_SAM'].values, label='A-SAM')
 plt.legend()
 plt.title('Spring SAM')
 figure.savefig('SAM_Hindcast_SON.png')
 
-figure_DJF=plt.figure(figsize=(10, 5))
-plt.plot(SAM_dict_DJF['SAM_sym_coefficient'].values, label='S-SAM')
-plt.plot(SAM_dict_DJF['SAM_asym_coefficient'].values, label='A-SAM')
-plt.legend()
-plt.title('Summer SAM')
-figure_DJF.savefig('SAM_Hindcast_DJF.png')
+#reset index
+SAM_ds_SON=SAM_ds_SON.reset_index('sample')
 
-#convert into xarray
-SAM_ds_SON=xr.merge([SAM_dict_SON['SAM_sym_coefficient'], SAM_dict_SON['SAM_asym_coefficient']])
-
-SAM_ds_DJF=xr.merge([SAM_dict_DJF['SAM_sym_coefficient'], SAM_dict_DJF['SAM_asym_coefficient']])
+#check arrays again
+print(SAM_ds_SON)
 
 #save xarray
 
 encoding = {var: {"zlib": True, "complevel": 4} for var in SAM_ds_SON.data_vars}
+SAM_ds_SON.to_netcdf('/climca/people/glattus/Hindcast_data_ready/SAM_ready_SON.nc', encoding=encoding)
+
+print('SAM spring is done!')
+
+#SAM comp for DJF
+SAM_dict_DJF=SAM_process_fast(DJF_z500)
+
+
+#convert into xarray
+
+SAM_ds_DJF=xr.merge([SAM_dict_DJF['SAM_sym_coefficient'], SAM_dict_DJF['SAM_asym_coefficient']])
+
+SAM_ds_DJF=standardize(SAM_ds_DJF)
+
+figure_DJF=plt.figure(figsize=(10, 5))
+plt.plot(SAM_dict_DJF['S_SAM'].values, label='S-SAM')
+plt.plot(SAM_dict_DJF['A_SAM'].values, label='A-SAM')
+plt.legend()
+plt.title('Summer SAM')
+figure_DJF.savefig('SAM_Hindcast_DJF.png')
+
+
+#reset index
+SAM_ds_DJF=SAM_ds_DJF.reset_index('sample')
+
+
+
 encoding_DJF = {var: {"zlib": True, "complevel": 4} for var in SAM_ds_DJF.data_vars}
 
-SAM_ds_SON.to_netcdf('/climca/people/glattus/Hindcast_data_ready/SAM_ready_SON.nc', encoding=encoding)
 SAM_ds_DJF.to_netcdf('/climca/people/glattus/Hindcast_data_ready/SAM_ready_DJF.nc', encoding=encoding_DJF)
+print('SAM summer is done!')
