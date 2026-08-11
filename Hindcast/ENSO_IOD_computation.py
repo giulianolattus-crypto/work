@@ -237,7 +237,7 @@ def season_to_leads(init_month, season_months):
 
     return leads
 
-def make_3_month_block(ds, lead_months, init_month):
+def make_3_month_block_old(ds, lead_months, init_month):
     """
     Select a 3-month forecast block.
 
@@ -272,12 +272,54 @@ def make_3_month_block(ds, lead_months, init_month):
 
     return block
 
+def make_3_month_block(ds, lead_months, init_month, block_name):
+
+    # Select forecast initializations occurring in this month
+    mask = ds.forecast_reference_time.dt.month == init_month
+
+    block = ds.where(mask, drop=True)
+
+    # Select the required forecast leads
+    block = block.sel(
+        forecastMonth=lead_months
+    )
+
+    # Save original lead numbers
+    block = block.assign_coords(
+        original_forecastMonth=(
+            "forecastMonth",
+            lead_months
+        )
+    )
+
+    # Rename lead dimension
+    block = block.rename(
+        {"forecastMonth": "season_month"}
+    )
+
+    # Seasonal positions
+    block = block.assign_coords(
+        season_month=[1, 2, 3]
+    )
+
+    # Create an actual init_month dimension
+    block = block.expand_dims(
+        init_month=[init_month]
+    )
+
+    # Season label
+    block = block.assign_coords(
+        lead_block=block_name
+    )
+
+    return block
+
 spring_leads_list=[]
 for init_month in [6,7,8,9]:
     ##spring season block
     lead_months_spring=season_to_leads(init_month=init_month, season_months=[9,10,11])
     print(lead_months_spring)
-    block_spring=make_3_month_block(ds, lead_months=lead_months_spring, init_month=init_month)
+    block_spring=make_3_month_block(ds, lead_months=lead_months_spring, init_month=init_month, block_name='SON_block')
     spring_leads_list.append(block_spring)
 
 summer_leads_list=[]
@@ -285,7 +327,7 @@ for init_month in [9,10,11,12]:
     ##summer season block
     lead_months_summer=season_to_leads(init_month=init_month, season_months=[12,1,2])
     print(lead_months_summer)
-    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month)
+    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month, block_name='SON_block')
     summer_leads_list.append(block_summer)
 
 

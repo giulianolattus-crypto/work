@@ -237,7 +237,7 @@ def season_to_leads(init_month, season_months):
 
     return leads
 
-def make_3_month_block(ds, lead_months, init_month):
+def make_3_month_block_old(ds, lead_months, init_month):
     """
     Select a 3-month forecast block.
 
@@ -272,12 +272,54 @@ def make_3_month_block(ds, lead_months, init_month):
 
     return block
 
+def make_3_month_block(ds, lead_months, init_month, block_name):
+
+    # Select forecast initializations occurring in this month
+    mask = ds.forecast_reference_time.dt.month == init_month
+
+    block = ds.where(mask, drop=True)
+
+    # Select the required forecast leads
+    block = block.sel(
+        forecastMonth=lead_months
+    )
+
+    # Save original lead numbers
+    block = block.assign_coords(
+        original_forecastMonth=(
+            "forecastMonth",
+            lead_months
+        )
+    )
+
+    # Rename lead dimension
+    block = block.rename(
+        {"forecastMonth": "season_month"}
+    )
+
+    # Seasonal positions
+    block = block.assign_coords(
+        season_month=[1, 2, 3]
+    )
+
+    # Create an actual init_month dimension
+    block = block.expand_dims(
+        init_month=[init_month]
+    )
+
+    # Season label
+    block = block.assign_coords(
+        lead_block=block_name
+    )
+
+    return block
+
 spring_leads_list=[]
 for init_month in [6,7,8,9]:
     ##spring season block
     lead_months_spring=season_to_leads(init_month=init_month, season_months=[9,10,11])
     print(lead_months_spring)
-    block_spring=make_3_month_block(ds, lead_months=lead_months_spring, init_month=init_month)
+    block_spring=make_3_month_block(ds, lead_months=lead_months_spring, init_month=init_month, block_name='SON_block')
     spring_leads_list.append(block_spring)
 
 summer_leads_list=[]
@@ -285,7 +327,7 @@ for init_month in [9,10,11,12]:
     ##summer season block
     lead_months_summer=season_to_leads(init_month=init_month, season_months=[12,1,2])
     print(lead_months_summer)
-    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month)
+    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month, block_name='DJF_block')
     summer_leads_list.append(block_summer)
 
 
@@ -556,6 +598,60 @@ pr_era_Andes_ssavg_DJF = process_region(DJF_mean[["tprate"]], **ANDES)
 pr_era_LaPlata_ssavg_SON = process_region(SON_mean[["tprate"]], **LA_PLATA)
 pr_era_LaPlata_ssavg_DJF = process_region(DJF_mean[["tprate"]], **LA_PLATA)
 
+for i, element in enumerate([t_Andes_ssavg_SON, t_Andes_ssavg_DJF, t_LaPlata_ssavg_SON, t_LaPlata_ssavg_DJF]):
+    fig=plt.figure(figsize=(10, 4))
+
+    if i<2:
+            region='Andes'
+    else:
+            region='La Plata'
+
+    if i % 2 == 0:
+        season='SON'
+    else: 
+        season='DJF'
+
+    element["t2m"].plot(
+        x="forecast_reference_time",
+        marker=".",
+        linestyle="none",
+        label=f"T {region} {season}",alpha=0.5
+    )
+
+    plt.axhline(0, color="black", linestyle="dashed")
+    plt.legend()
+    
+
+    plt.title(f"{region} {season} temperature anomalies")
+    fig.savefig(f'Index_comp/{region}_{season}_temperature_ts.jpg', dpi=300)
+
+for i, element in enumerate([pr_era_Andes_ssavg_SON, pr_era_Andes_ssavg_DJF, pr_era_LaPlata_ssavg_SON, pr_era_LaPlata_ssavg_DJF]):
+    fig=plt.figure(figsize=(10, 4))
+
+    if i<2:
+            region='Andes'
+    else:
+            region='La Plata'
+
+    if i % 2 == 0:
+        season='SON'
+    else: 
+        season='DJF'
+
+    element["tprate"].plot(
+        x="forecast_reference_time",
+        marker=".",
+        linestyle="none",
+        label=f"Precip {region} {season}",alpha=0.5
+    )
+
+    plt.axhline(0, color="black", linestyle="dashed")
+    plt.legend()
+    
+
+    plt.title(f"{region} {season} precipitation anomalies")
+    fig.savefig(f'Index_comp/{region}_{season}_precipitation_ts.jpg', dpi=300)
+
 def rename_precip(ds):
     if 'tprate' in ds.data_vars:
         ds = ds.rename({"tprate": "tp"})
@@ -583,6 +679,7 @@ ds_LP_SON=ds_LP_SON.reset_index('sample')
 ds_LP_DJF=ds_LP_DJF.reset_index('sample')
 #print(ds_Andes_SON)
 encoding = {var: {"zlib": True, "complevel": 4} for var in ds_Andes_SON.data_vars}
+
 ds_Andes_DJF.to_netcdf(save_path+save_folder+'/Target_vars_Andes_DJF.nc', encoding=encoding)
 print('Summer Andes saved')
 ds_Andes_SON.to_netcdf(save_path+save_folder+'/Target_vars_Andes_SON.nc', encoding=encoding)

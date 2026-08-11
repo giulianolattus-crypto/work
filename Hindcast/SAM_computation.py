@@ -417,7 +417,7 @@ def season_to_leads(init_month, season_months):
 
     return leads
 
-def make_3_month_block(ds, lead_months, init_month):
+def make_3_month_block_old(ds, lead_months, init_month):
     """
     Select a 3-month forecast block.
 
@@ -448,6 +448,48 @@ def make_3_month_block(ds, lead_months, init_month):
     #assign lead block name
     block = block.assign_coords(
         init_month=init_month
+    )
+
+    return block
+
+def make_3_month_block(ds, lead_months, init_month, block_name):
+
+    # Select forecast initializations occurring in this month
+    mask = ds.forecast_reference_time.dt.month == init_month
+
+    block = ds.where(mask, drop=True)
+
+    # Select the required forecast leads
+    block = block.sel(
+        forecastMonth=lead_months
+    )
+
+    # Save original lead numbers
+    block = block.assign_coords(
+        original_forecastMonth=(
+            "forecastMonth",
+            lead_months
+        )
+    )
+
+    # Rename lead dimension
+    block = block.rename(
+        {"forecastMonth": "season_month"}
+    )
+
+    # Seasonal positions
+    block = block.assign_coords(
+        season_month=[1, 2, 3]
+    )
+
+    # Create an actual init_month dimension
+    block = block.expand_dims(
+        init_month=[init_month]
+    )
+
+    # Season label
+    block = block.assign_coords(
+        lead_block=block_name
     )
 
     return block
@@ -488,11 +530,11 @@ def create_sample_and_cobmine_seasons(ds_3m_SON, ds_3m_DJF):
 
 
 z500_data_3m_SON = xr.concat(
-    [make_3_month_block(z500_data, season_to_leads(init_month=init_month, season_months=[9,10,11]), init_month=init_month) for init_month in [6,7,8,9]],
+    [make_3_month_block(z500_data, season_to_leads(init_month=init_month, season_months=[9,10,11]), init_month=init_month, block_name='SON_block') for init_month in [6,7,8,9]],
     dim="init_month")
 
 z500_data_3m_DJF = xr.concat(
-    [make_3_month_block(z500_data, season_to_leads(init_month=init_month, season_months=[12,1,2]), init_month=init_month) for init_month in [9,10,11,12]],
+    [make_3_month_block(z500_data, season_to_leads(init_month=init_month, season_months=[12,1,2]), init_month=init_month, block_name='DJF_block') for init_month in [9,10,11,12]],
     dim="init_month")
 
 z500_data_3m=create_sample_and_cobmine_seasons(z500_data_3m_SON.sel(pressure_level=500), z500_data_3m_DJF.sel(pressure_level=500))
@@ -545,8 +587,8 @@ SAM_ds_DJF=xr.merge([SAM_dict_DJF['SAM_sym_coefficient'], SAM_dict_DJF['SAM_asym
 SAM_ds_DJF=standardize(SAM_ds_DJF)
 
 figure_DJF=plt.figure(figsize=(10, 5))
-plt.plot(SAM_dict_DJF['S_SAM'].values, label='S-SAM')
-plt.plot(SAM_dict_DJF['A_SAM'].values, label='A-SAM')
+plt.plot(SAM_ds_DJF['S_SAM'].values, label='S-SAM')
+plt.plot(SAM_ds_DJF['A_SAM'].values, label='A-SAM')
 plt.legend()
 plt.title('Summer SAM')
 figure_DJF.savefig('SAM_Hindcast_DJF.png')
