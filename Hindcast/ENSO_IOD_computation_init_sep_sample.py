@@ -174,41 +174,6 @@ ds=make_valid_time(ds)
 
 
 ##Make blocks
-def make_3_month_block(ds, lead_months, block_name):
-    """
-    Select a 3-month forecast block.
-
-    lead_months can be:
-        [1, 2, 3]
-        [4, 5, 6]
-
-    block_name is just a label:
-        "lead_1_2_3"
-        "lead_4_5_6"
-    """
-
-    #select requested lead months
-    block = ds.sel(forecastMonth=lead_months)
-
-    #save them in new coordinate
-    block = block.assign_coords(
-        original_forecastMonth=("forecastMonth", lead_months)
-    )
-
-    #rename old coordinate to new name
-    block = block.rename({"forecastMonth": "season_month"})
-
-    #reset month numbering
-    block = block.assign_coords(
-        season_month=[1, 2, 3]
-    )
-    #assign lead block name
-    block = block.assign_coords(
-        lead_block=block_name
-    )
-
-    return block
-
 #Find lead times
 def season_to_leads(init_month, season_months):
     """
@@ -327,7 +292,7 @@ for init_month in [9,10,11,12]:
     ##summer season block
     lead_months_summer=season_to_leads(init_month=init_month, season_months=[12,1,2])
     print(lead_months_summer)
-    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month, block_name='SON_block')
+    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month, block_name='DJF_block')
     summer_leads_list.append(block_summer)
 
 
@@ -362,16 +327,17 @@ def create_sample_and_cobmine_seasons(ds_3m_SON, ds_3m_DJF):
 
     #create sample multiindex
     ds_3m_SON = ds_3m_SON.stack(
-        sample=("init_month", 'season', "forecast_reference_time", "number")
+        sample=('season', "forecast_reference_time", "number")
     )
     ds_3m_DJF = ds_3m_DJF.stack(
-        sample=("init_month", 'season', "forecast_reference_time", "number")
+        sample=('season', "forecast_reference_time", "number")
     )
 
     
 
     ds_3m_SON = ds_3m_SON.transpose(
         "sample",
+        'init_month',
         "season_month",
         "latitude",
         "longitude"
@@ -379,6 +345,7 @@ def create_sample_and_cobmine_seasons(ds_3m_SON, ds_3m_DJF):
 
     ds_3m_DJF = ds_3m_DJF.transpose(
         "sample",
+        'init_month',
         "season_month",
         "latitude",
         "longitude"
@@ -403,6 +370,7 @@ DJF_mean = DJF.mean(dim="season_month")
 ###############################################################
 #DATA PREPARATION
 #################################################################
+print('Data preparation start')
 def select_region(ds, lat_min, lat_max, lon_min, lon_max):
     """
     Select a latitude-longitude box.
@@ -522,6 +490,18 @@ def standardize(ds):
     return ds / ds.std(dim="sample")
 
 
+def process_init_month_sep(ds, func, **kwargs):
+    results = []
+
+    for init_month in ds.init_month:
+        out = func(ds.sel(init_month=init_month), **kwargs)
+        out = out.expand_dims(init_month=[init_month.item()])
+        results.append(out)
+
+    ds_out=xr.concat(results, dim="init_month")
+    ds_out=ds_out.chunk({'sample':1000})
+    return ds_out
+
 ##Functions for ENSO & IOD
 def ENSO_process(sst):
     'Computation of Nino3.4 index from sst field (ideally already monthly)'
@@ -617,42 +597,10 @@ def IOD_process(sst):
 
 sst_SON=SON_mean[['sst']]
 sst_DJF=DJF_mean[['sst']]
-nino_SON=ENSO_process(sst_SON)
-nino_DJF=ENSO_process(sst_DJF)
-IOD_SON=IOD_process(sst_SON)
+nino_SON=process_init_month_sep(sst_SON, ENSO_process)
+nino_DJF=process_init_month_sep(sst_DJF, ENSO_process)
+IOD_SON=process_init_month_sep(sst_SON, IOD_process)
 
-
-fig=plt.figure(figsize=(10, 4))
-
-nino_SON["nino34"].plot(
-    x="forecast_reference_time",
-    marker=".",
-    linestyle="none",
-    label="ENSO SON", alpha=.5
-)
-plt.close()
-
-nino_DJF["nino34"].plot(
-    x="forecast_reference_time",
-    marker=".",
-    linestyle="none",
-    label="ENSO DJF", alpha=.5
-)
-
-plt.axhline(0, color="black", linestyle="dashed")
-plt.legend()
-plt.title("ENSO index")
-
-fig.savefig('Index_comp/ENSO_index.jpg', dpi=300)
-plt.close()
-
-fig2=plt.figure(figsize=(6,6))
-IOD_SON['iod_index'].plot(x='forecast_reference_time',
-                          marker='.', linestyle='none', label='IOD SON')
-plt.axhline(0, color='black', linestyle='dashed')
-plt.legend()
-fig2.savefig('Index_comp/IOD_index.jpg')
-plt.close()
 
 ## save ocean drivers in nc file
 save_path='/climca/people/glattus/'
@@ -662,7 +610,7 @@ save_folder='Hindcast_data_ready'
 ds_ocean_SON=xr.merge([IOD_SON, nino_SON])
 ds_ocean_SON=ds_ocean_SON.reset_index('sample')
 encoding_ocean = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_SON.data_vars}
-ds_ocean_SON.to_netcdf(save_path+save_folder+'/ENSO_IOD_SON.nc', encoding=encoding_ocean)
+ds_ocean_SON.to_netcdf(save_path+save_folder+'/ENSO_IOD_SON_init_sep.nc', encoding=encoding_ocean)
 print('Spring data saved!')
 
 
@@ -763,14 +711,37 @@ def IOBW_process(sst):
     return IOBW_index
 
 
-IOBW_index=IOBW_process(sst_DJF)
+IOBW_index=process_init_month_sep(sst_DJF, IOBW_process)
 print('IOBW computation finished!')
 
+for i, element in enumerate([nino_SON, nino_DJF, IOD_SON, IOBW_index]):
+    fig=plt.figure(figsize=(10, 4))
+
+    for init in np.unique(element.init_month.values):
+        if isinstance(element,xr.Dataset):
+            var=list(element.data_vars)[0]
+        elif isinstance(element,xr.DataArray):
+            var=element.name
+
+        element.sel(init_month=init)[var].plot(
+                        x="forecast_reference_time",
+                        marker=".",
+                        linestyle="none",
+                        label=f" {var} {init}",alpha=0.5
+                    )
+
+
+    plt.axhline(0, color="black", linestyle="dashed")
+    plt.legend()
+    
+
+    plt.title(f"{var}")
+    fig.savefig(f'Index_comp/{var}_ts.jpg', dpi=300)
 
 #save the DJF indices
 ds_ocean_DJF=xr.merge([IOBW_index, nino_DJF])
 ds_ocean_DJF=ds_ocean_DJF.reset_index('sample')
 encoding_ocean_DJF = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_DJF.data_vars}
-ds_ocean_DJF.to_netcdf(save_path+save_folder+'/ENSO_IOB_DJF.nc', encoding=encoding_ocean_DJF)
+ds_ocean_DJF.to_netcdf(save_path+save_folder+'/ENSO_IOB_DJF_init_sep.nc', encoding=encoding_ocean_DJF)
 
 print('Summer data saved!')

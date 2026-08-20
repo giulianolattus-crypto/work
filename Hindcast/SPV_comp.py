@@ -105,15 +105,13 @@ def stdize_ssavg(da):
 ##Open data
 # Path to your NetCDF file
 DATADIR='/climca/data/SEAS5_SA/data'
-file_new = f"{DATADIR}/seas5_single_levels_06-12month_1-6leadtimemonth.nc"
+
 # Open the dataset
 # chunks is useful because your dataset is huge.
 # It avoids loading everything into memory immediately.
 
-ds=xr.open_dataset(file_new, chunks={
-        "number": 1,
-        "forecast_reference_time": 10,
-        "forecastMonth": 6
+ds=xr.open_dataset(DATADIR+'/seas5_pressure_levels_wind_06-12month_1-6leadtime_month.nc', 
+                       chunks={'number':1, 'forecast_reference_time':10, 'forecastMonth':6
     })
 
 
@@ -385,7 +383,8 @@ def create_sample_and_cobmine_seasons(ds_3m_SON, ds_3m_DJF):
     )
     return ds_3m_SON, ds_3m_DJF
 
-ds_3m_list = create_sample_and_cobmine_seasons(ds_3m_SON, ds_3m_DJF)
+ds_3m_list = create_sample_and_cobmine_seasons(ds_3m_SON.sel(pressure_level=50), 
+                                              ds_3m_DJF.sel(pressure_level=50))
 
 
 SON = ds_3m_list[0].where(ds_3m_list[0]["season"] == "SON", drop=True)
@@ -398,7 +397,6 @@ print("DJF samples:", DJF.sizes["sample"])
 
 SON_mean = SON.mean(dim="season_month")
 DJF_mean = DJF.mean(dim="season_month")
-
 
 ###############################################################
 #DATA PREPARATION
@@ -521,256 +519,52 @@ def standardize(ds):
 
     return ds / ds.std(dim="sample")
 
+#Function for SPV index computation
+def SPV_process(ds_50):
+    ### Stratospheric zonal winds
 
-##Functions for ENSO & IOD
-def ENSO_process(sst):
-    'Computation of Nino3.4 index from sst field (ideally already monthly)'
 
-    print('Start ENSO comp')
-    sst_nino = select_region(
-        sst,
-        lat_min=-5,
-        lat_max=5,
-        lon_min=190,
-        lon_max=240
-    ) #fixed region
-    sst_anomaly_nino=compute_sample_anomaly(sst_nino)
-    sst_anomaly_nino_weighted=spatial_average(sst_anomaly_nino)
+    # polar vortex following kretschmer which follows byrne 2019
+    polar_vortex =  select_region(ds_50, lat_min=-65, lat_max=-55, lon_min=0, lon_max=360)
+
+    #compute anomaly (#climatologicl mean!!!), weight by lat and average for every gridpoint
+    polar_vortex_an=compute_sample_anomaly(polar_vortex)
+    polar_vortex_space=spatial_average(polar_vortex_an)
     
-    nino_detr=detrend_across_time(sst_anomaly_nino_weighted)
-    print('Detrended ENSO')
-    
-    sst_anomaly_smoothed = nino_detr.rolling(sample=5, center=True).mean()
-    nino34_index=standardize(sst_anomaly_smoothed)
-    nino34_index=nino34_index.rename({'sst':'nino34'})
-    print('ENSO index computed')
-    return nino34_index
 
-
-from scipy.signal import butter, filtfilt
-
-# Function to apply a low-pass filter (removes >7-year variations)
-
-def lowpass_filter(da, cutoff=1/7, fs=12):
-    nyq=fs/2
-    wn=cutoff/nyq #standardising my input frequency with nyquist
-    # Design the Butterworth filter
-    b, a = butter(N=6, Wn=wn, btype='high', fs=fs) 
-    #actually it is high pass because low frequency signal acts on long timescales
-
-    # Define a function to apply the filter on 1D time series
-    def filter_1d(x):
-        if np.any(np.isnan(x)):  # Handle NaNs
-            x = np.nan_to_num(x, nan=np.nanmean(x))  # Replace NaNs with mean
-        return filtfilt(b, a, x)
-
-    # Apply the filter along the 'time' dimension
-    filtered_da = xr.apply_ufunc(
-        filter_1d, 
-        da, 
-        input_core_dims=[["sample"]],  # Apply only along 'sample'
-        output_core_dims=[["sample"]],
-        vectorize=True  # Ensures it works for each lat/lon point
-    )
-
-    return filtered_da
-
-# Function to apply a 3-month running mean
-def running_mean(da, window=3):
-    return da.rolling(time=window, center=True).mean()
-
-def IOD_process(sst):
-    ##modify to adapt worklfow of julia
-    '''Computation procedure for IOD index'''
-    print('Start IOD comp')
-    sst_io_eastweighted=select_region(sst, lat_min=-10, 
-                                      lat_max=0,
-                                      lon_min=90,
-                                      lon_max=110)
-    sst_io_westweighted=select_region(sst, lat_min=-10,
-                                      lat_max=10,
-                                      lon_max=70,
-                                      lon_min=50)
-   
-    #weight by lat and spatial avg after anomaly comp
-    sst_anom_ioe=spatial_average(compute_sample_anomaly(sst_io_eastweighted))
-    sst_anom_iow=spatial_average(compute_sample_anomaly(sst_io_westweighted))
-    print('Anomaly computed')
     #detrend
-    ioe_detr=detrend_across_time(sst_anom_ioe).compute()
-    iow_detr=detrend_across_time(sst_anom_iow).compute()
+    polar_vortex_detr=detrend_across_time(polar_vortex_space)
+    print('Detrended')
+    #polar_vortex_detr = polar_vortex_detr.chunk({"sample": -1}).compute()
+    #print('Dasked array computed!')
+    #smoothen
+    vortex_smoothed = polar_vortex_detr.sortby("forecast_reference_time")
 
-    #filter high freqs
-    print('Start lowpass')
-    ioe_filtered=lowpass_filter(ioe_detr)
-    iow_filtered=lowpass_filter(iow_detr)
-    #smooth and compute IOD index
-    iode_smoothed=ioe_filtered.rolling(sample=3, center=True).mean()
-    iodw_smoothed=iow_filtered.rolling(sample=3, center=True).mean()
-    iod_index=iodw_smoothed-iode_smoothed
-    iod_index_ssavg=standardize(iod_index).rename({'sst':'iod_index'})
-    print('IOD index computed')
-    return iod_index_ssavg
+    vortex_smoothed = vortex_smoothed.rolling(sample=3, center=True).mean()
 
-################################################################
-#Start ENSO and IOD comp
-
-sst_SON=SON_mean[['sst']]
-sst_DJF=DJF_mean[['sst']]
-nino_SON=ENSO_process(sst_SON)
-nino_DJF=ENSO_process(sst_DJF)
-IOD_SON=IOD_process(sst_SON)
+    #normalise
+    SPV_index=standardize(vortex_smoothed)
+    print('SPV index is ready!')
+    return SPV_index
 
 
-fig=plt.figure(figsize=(10, 4))
+spv_index_SON=SPV_process(SON_mean[['u']])
 
-nino_SON["nino34"].plot(
+fig=plt.figure(figsize=(8,6))
+spv_index_SON["u"].plot(
     x="forecast_reference_time",
     marker=".",
-    linestyle="none",
-    label="ENSO SON", alpha=.5
+    linestyle="none"
 )
-plt.close()
-
-nino_DJF["nino34"].plot(
-    x="forecast_reference_time",
-    marker=".",
-    linestyle="none",
-    label="ENSO DJF", alpha=.5
-)
-
 plt.axhline(0, color="black", linestyle="dashed")
-plt.legend()
-plt.title("ENSO index")
+fig.savefig('Index_comp/spv_SON_comp_index.jpg',dpi=300)
 
-fig.savefig('Index_comp/ENSO_index.jpg', dpi=300)
-plt.close()
+ds_strato_SON=spv_index_SON.reset_index('sample')
 
-fig2=plt.figure(figsize=(6,6))
-IOD_SON['iod_index'].plot(x='forecast_reference_time',
-                          marker='.', linestyle='none', label='IOD SON')
-plt.axhline(0, color='black', linestyle='dashed')
-plt.legend()
-fig2.savefig('Index_comp/IOD_index.jpg')
-plt.close()
-
-## save ocean drivers in nc file
 save_path='/climca/people/glattus/'
 save_folder='Hindcast_data_ready'
 
-#save SON indices
-ds_ocean_SON=xr.merge([IOD_SON, nino_SON])
-ds_ocean_SON=ds_ocean_SON.reset_index('sample')
-encoding_ocean = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_SON.data_vars}
-ds_ocean_SON.to_netcdf(save_path+save_folder+'/ENSO_IOD_SON.nc', encoding=encoding_ocean)
-print('Spring data saved!')
-
-
-
-#####################################################################
-#Additional functions for summer indian ocean mode comp
-#####################################################################
-
-def plot_eof1(Vt, X_2d, title="EOF1 pattern"):
-    eof1 = Vt[0, :]
-
-    eof1_map = xr.DataArray(
-        eof1,
-        coords={"space": X_2d.space},
-        dims=["space"],
-        name="EOF1"
-    ).unstack("space")
-
-    eof1_map.plot()
-    plt.title(title)
-    plt.savefig('Index_comp/EOF1_IOBW')
-    plt.close()
-    return eof1_map
-
-def plot_pc1(pc1_ts, title="PC1 time series"):
-    pc1_ts.plot(x='forecast_reference_time',
-                          marker='.', linestyle='none', label='IOB DJF')
-    plt.axhline(0, color='black', linestyle='dashed')
-    plt.legend()
-    plt.title(title)
-    plt.savefig('Index_comp/PC1_IOBW.jpg')
-    plt.close()
-
-
-def IOBW_process(sst):
-
-    # 1. Select Indian Ocean region
-    sst_io_whole = select_region(
-        sst,
-        lat_max=26,
-        lat_min=-26,
-        lon_max=120,
-        lon_min=30
-    ).sortby("latitude", ascending=True)
-
-    # 2. Anomaly
-    sst_anom = compute_sample_anomaly(sst_io_whole)
-    print("Anomaly computed")
-
-    # 3. Detrend
-    sst_detr = detrend_across_time(sst_anom)
-
-    # 4. Latitude weighting (IMPORTANT: apply on grid, not sample)
-    sst_weighted = weight_by_latitude(sst_detr)
-    print('Weighted by latitude')
-    X = sst_weighted["sst"]
-
-    X_2d = X.stack(space=("latitude", "longitude"))
-    X_2d = X_2d.transpose("sample", "space")
-    X_2d = X_2d.fillna(np.nanmean(X_2d))
-
-
-    print('Safety checks!')
-    print("Shape:", X_2d.shape)
-    print("Size (GB):", X_2d.nbytes / 1024**3)  
-    print("Finite:", np.isfinite(X_2d).all())
-    print("NaNs:", np.isnan(X_2d).sum())
-    print("Infs:", np.isinf(X_2d).sum())
-    
-    
-    print("Performing PCA...")
-
-    # 7. SVD / PCA
-    U, S, Vt = perform_svd(X_2d.values)
-
-    print(U.shape, S.shape, Vt.shape)
-    eof1_map = plot_eof1(Vt, X_2d)
-
-    # 8. PC1 time series
-    PC1 = U[:, 0] * S[0]
-
-    PC1_ts = xr.DataArray(
-        PC1,
-        coords={"sample": X_2d.sample},
-        dims=["sample"],
-        name="IOBW"
-    )
-
-    # 9. Sign convention
-    PC1_ts = -PC1_ts
-
-    # 10. Standardization
-    IOBW_index = standardize(PC1_ts)
-    plot_pc1(IOBW_index)
-    
-    print("PCA finished")
-
-    return IOBW_index
-
-
-IOBW_index=IOBW_process(sst_DJF)
-print('IOBW computation finished!')
-
-
-#save the DJF indices
-ds_ocean_DJF=xr.merge([IOBW_index, nino_DJF])
-ds_ocean_DJF=ds_ocean_DJF.reset_index('sample')
-encoding_ocean_DJF = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_DJF.data_vars}
-ds_ocean_DJF.to_netcdf(save_path+save_folder+'/ENSO_IOB_DJF.nc', encoding=encoding_ocean_DJF)
-
-print('Summer data saved!')
+ds_strato_SON= spv_index_SON#xr.merge([spv_index_SON]) # , VB_index])
+ds_strato_SON=ds_strato_SON.reset_index('sample').chunk({"sample": -1})   # one chunk
+encoding_strato_SON = {var: {"zlib": True, "complevel": 4} for var in ds_strato_SON.data_vars}
+ds_strato_SON.to_netcdf(save_path+save_folder+'/SPV_SON.nc', encoding=encoding_strato_SON)
