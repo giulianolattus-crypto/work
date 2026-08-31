@@ -590,6 +590,9 @@ SON_ready=SON_mean.rename({'tprate':'tp'})[vars]
 SON_Andes_region=select_region(SON_ready, lat_min=-55, lat_max=-35, lon_max=290, lon_min=284)
 SON_LP_region=select_region(SON_ready, lat_min=-32, lat_max=-20, lon_min=298, lon_max=311)
 
+#add conversion from tp rate to tp (multiplymby 3600s?)
+#if var=='tp': do ds*3600
+
 Andes_SON_abs=spatial_average(SON_Andes_region).compute()
 LP_SON_abs=spatial_average(SON_LP_region).compute()
 
@@ -1270,38 +1273,45 @@ for var in vars:
     ts_Andes_SON=time_series_plot(Andes_SON_abs[var], var, Andes_SON_abs_era, 
                                   f'Time series of absolute {var} values in Andes SON')
     ts_Andes_SON.savefig(folder+f'ts_{var}_Andes_SON_comparison.jpg',dpi=300)
+    plt.close()
 
     ts_LP_SON_temp=time_series_plot(LP_SON_abs[var], var, LP_SON_abs_era,
                                      f'Time series of absolute {var} values in La Plata SON')
     ts_LP_SON_temp.savefig(folder+f'ts_{var}_LP_SON_comparison.jpg')
+    plt.close()
 
     #b) DJF
     ts_Andes_DJF=time_series_plot(Andes_DJF_abs[var], var, Andes_DJF_abs_era, 
                                       f'Time series of absolute {var} values in Andes DJF')
     ts_Andes_DJF.savefig(folder+f'ts_{var}_Andes_DJF_comparison.jpg',dpi=300)
+    plt.close()
     
     ts_LP_DJF_temp=time_series_plot(LP_DJF_abs[var], var, LP_DJF_abs_era,
                                          f'Time series of absolute {var} values in La Plata DJF')
     ts_LP_DJF_temp.savefig(folder+f'ts_{var}_LP_DJF_comparison.jpg')
+    plt.close()
     
 
     print(f'Time series for {var} finished!')
     #2. model eval plots
+    #SON
     boot_Andes_SON_abs=bootstrap_chain(Andes_SON_abs, 200, var=var, sep_lead=True)
     eval_Andes_SON=model_eval_plot(boot_Andes_SON_abs, Andes_SON_abs_era[var], f'Model evaluation of absolute {var} values in Andes SON',
                                    Andes_SON_abs)
 
     eval_Andes_SON[-1].savefig(folder+f'eval_plot_{var}_Andes_SON_comparison.jpg', dpi=300)
+    plt.close()
 
     boot_LP_SON_abs=bootstrap_chain(LP_SON_abs, 200, var=var, sep_lead=True)
     eval_LP_SON=model_eval_plot(boot_LP_SON_abs, LP_SON_abs_era[var], f'Model evaluation of absolute {var} values in La Plata SON',
                                        LP_SON_abs)
     
     eval_LP_SON[-1].savefig(folder+f'eval_plot_{var}_LP_SON_comparison.jpg', dpi=300)
+    plt.close()
 
     print(f'Model eval for {var} finished!')
     
 print('Script finished!')
 
 
-
+###somewhere buggy because never finsihed successfully even though all plots done
