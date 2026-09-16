@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 DATADIR = "/climca/data/SEAS5_SA/data"
 
 ds = xr.open_dataset(
-    DATADIR + "/seas5_daily_u_component_wind_50hPa_SepInit.nc",
+    DATADIR + "/seas5_daily_u_component_wind_50hPa_OctInit.nc",
     decode_cf=False,
     chunks={
         "number": 1,
@@ -58,11 +58,23 @@ def prepare_u60S(u):
 def smooth_forecast_period(u_60S, window=5):
     return u_60S.rolling(forecast_period=window, center=True).mean()
 
-def _find_breakdown_doy_1d(u_values, valid_times, threshold=10.0, crossing="last"):
+def _find_breakdown_doy_1d(
+    u_values,
+    valid_times,
+    threshold=10.0,
+    crossing="last"
+):
     ok = np.isfinite(u_values)
 
     if ok.sum() == 0:
-        return np.nan
+        return np.nan, False
+
+    # Find first valid value after smoothing
+    first_valid_idx = np.where(ok)[0][0]
+
+    # VB has already occurred at the beginning of the forecast
+    if u_values[first_valid_idx] < threshold:
+        return np.nan, True
 
     below = (u_values < threshold) & ok
 
@@ -74,7 +86,7 @@ def _find_breakdown_doy_1d(u_values, valid_times, threshold=10.0, crossing="last
     idx = np.where(crossed)[0]
 
     if len(idx) == 0:
-        return np.nan
+        return np.nan, False
 
     if crossing == "first":
         i = idx[0]
@@ -84,7 +96,8 @@ def _find_breakdown_doy_1d(u_values, valid_times, threshold=10.0, crossing="last
         raise ValueError("crossing must be 'first' or 'last'")
 
     date = pd.Timestamp(valid_times[i])
-    return float(date.dayofyear)
+
+    return float(date.dayofyear), False
 
 def _find_breakdown_wrapped_doy_1d(
     u_values,
@@ -154,12 +167,19 @@ breakdown_doy = compute_vortex_breakdown_doy(
     threshold=10.0,
     window=5,
     crossing="last",
-).compute()
+)
 
-print(breakdown_doy)
+breakdown_doy = breakdown_doy.compute()
+
+
+early = breakdown_doy == breakdown_doy.min()
+
+print(
+    breakdown_doy.where(early, drop=True)
+)
 
 # Convert to a DataFrame
 df = breakdown_doy.to_dataframe(name="VB_DOY").reset_index()
 
 # Save to CSV
-df.to_csv("/climca/people/glattus/Hindcast_data_ready/SEAS5_VortexBreakdown_DOY_Sep.csv", index=False)
+df.to_csv("/climca/people/glattus/Hindcast_data_ready/SEAS5_VortexBreakdown_DOY_Oct.csv", index=False)

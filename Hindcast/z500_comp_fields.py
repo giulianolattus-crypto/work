@@ -7,6 +7,7 @@ import statsmodels.api as sm
 import pandas as pd
 from seaborn import regplot
 from seaborn import heatmap
+import cartopy.crs as ccrs
 
 
 def weight_by_latitude(da):
@@ -105,7 +106,7 @@ def stdize_ssavg(da):
 ##Open data
 # Path to your NetCDF file
 DATADIR='/climca/data/SEAS5_SA/data'
-file_new = f"{DATADIR}/seas5_single_levels_06-12month_1-6leadtimemonth.nc"
+file_new = f"{DATADIR}/seas5_pressure_levels_06-12month_1-6leadtimemonth.nc"
 # Open the dataset
 # chunks is useful because your dataset is huge.
 # It avoids loading everything into memory immediately.
@@ -327,7 +328,7 @@ for init_month in [9,10,11,12]:
     ##summer season block
     lead_months_summer=season_to_leads(init_month=init_month, season_months=[12,1,2])
     print(lead_months_summer)
-    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month, block_name='SON_block')
+    block_summer=make_3_month_block(ds, lead_months=lead_months_summer, init_month=init_month, block_name='DJF_block')
     summer_leads_list.append(block_summer)
 
 
@@ -385,8 +386,8 @@ def create_sample_and_cobmine_seasons(ds_3m_SON, ds_3m_DJF):
     )
     return ds_3m_SON, ds_3m_DJF
 
-ds_3m_list = create_sample_and_cobmine_seasons(ds_3m_SON, ds_3m_DJF)
-
+ds_3m_list = create_sample_and_cobmine_seasons(ds_3m_SON.sel(pressure_level=500), 
+                                               ds_3m_DJF.sel(pressure_level=500))
 
 SON = ds_3m_list[0].where(ds_3m_list[0]["season"] == "SON", drop=True)
 
@@ -403,6 +404,7 @@ DJF_mean = DJF.mean(dim="season_month")
 ###############################################################
 #DATA PREPARATION
 #################################################################
+print('Data preparation start')
 def select_region(ds, lat_min, lat_max, lon_min, lon_max):
     """
     Select a latitude-longitude box.
@@ -521,293 +523,147 @@ def standardize(ds):
 
     return ds / ds.std(dim="sample")
 
+def sea_mask(da):
+    landsea_mask=xr.open_dataset('~/work/landseamask.nc') # mask values 0 (sea) or 1 (land)
 
-##Functions for ENSO & IOD
-def ENSO_process(sst):
-    'Computation of Nino3.4 index from sst field (ideally already monthly)'
+    #for a global field (or Western Hemisphere specifically)
+    #transform lon from -180,180 to 0,360
+    if max(da.longitude.values)>180.0:
+            landsea_mask["lon"] = landsea_mask["lon"] % 360
+            landsea_mask = landsea_mask.sortby("lon")
 
-    print('Start ENSO comp')
-    sst_nino = select_region(
-        sst,
-        lat_min=-5,
-        lat_max=5,
-        lon_min=190,
-        lon_max=240
-    ) #fixed region
-    sst_anomaly_nino=compute_sample_anomaly(sst_nino)
-    sst_anomaly_nino_weighted=spatial_average(sst_anomaly_nino)
+    landsea_mask_interp = landsea_mask['mask'].interp(
+    lat=da.latitude,
+    lon=da.longitude,
+    method='nearest') ##map my mask 0.5° on my 1° grid
+
+    #maybe does not work ideally because finer grid can corroborate results
+
+    #print(landsea_mask.sel(lat=-32.25,lon=-50.25)['mask'].values)
     
-    nino_detr=detrend_across_time(sst_anomaly_nino_weighted)
-    print('Detrended ENSO')
-    
-    sst_anomaly_smoothed = nino_detr.rolling(sample=5, center=True).mean()
-    nino34_index=standardize(sst_anomaly_smoothed)
-    nino34_index=nino34_index.rename({'sst':'nino34'})
-    print('ENSO index computed')
-    return nino34_index
+    masked_da=da.where(landsea_mask_interp==1, drop=True)
+    return masked_da
 
+def process_region(ds_season, lat_min, lat_max, lon_min, lon_max):
+    """
+    Full pipeline for one region and one season.
 
-from scipy.signal import butter, filtfilt
+    Input:
+        ds_season = SON_mean or DJF_mean
 
-# Function to apply a low-pass filter (removes >7-year variations)
+    Output:
+        standardized anomaly time series for all samples
+    """
 
-def lowpass_filter(da, cutoff=1/7, fs=12):
-    nyq=fs/2
-    wn=cutoff/nyq #standardising my input frequency with nyquist
-    # Design the Butterworth filter
-    b, a = butter(N=6, Wn=wn, btype='high', fs=fs) 
-    #actually it is high pass because low frequency signal acts on long timescales
-
-    # Define a function to apply the filter on 1D time series
-    def filter_1d(x):
-        if np.any(np.isnan(x)):  # Handle NaNs
-            x = np.nan_to_num(x, nan=np.nanmean(x))  # Replace NaNs with mean
-        return filtfilt(b, a, x)
-
-    # Apply the filter along the 'time' dimension
-    filtered_da = xr.apply_ufunc(
-        filter_1d, 
-        da, 
-        input_core_dims=[["sample"]],  # Apply only along 'sample'
-        output_core_dims=[["sample"]],
-        vectorize=True  # Ensures it works for each lat/lon point
+    # 1. Select region
+    region = select_region(
+        ds_season,
+        lat_min=lat_min,
+        lat_max=lat_max,
+        lon_min=lon_min,
+        lon_max=lon_max
     )
 
-    return filtered_da
+    # 2. Anomaly over samples
+    region_an = compute_sample_anomaly(region)
 
-# Function to apply a 3-month running mean
-def running_mean(da, window=3):
-    return da.rolling(time=window, center=True).mean()
+    # 3. Remove linear trend across time/sample
+    region_detr = detrend_across_time(region_an)
 
-def IOD_process(sst):
-    ##modify to adapt worklfow of julia
-    '''Computation procedure for IOD index'''
-    print('Start IOD comp')
-    sst_io_eastweighted=select_region(sst, lat_min=-10, 
-                                      lat_max=0,
-                                      lon_min=90,
-                                      lon_max=110)
-    sst_io_westweighted=select_region(sst, lat_min=-10,
-                                      lat_max=10,
-                                      lon_max=70,
-                                      lon_min=50)
-   
-    #weight by lat and spatial avg after anomaly comp
-    sst_anom_ioe=spatial_average(compute_sample_anomaly(sst_io_eastweighted))
-    sst_anom_iow=spatial_average(compute_sample_anomaly(sst_io_westweighted))
-    print('Anomaly computed')
-    #detrend
-    ioe_detr=detrend_across_time(sst_anom_ioe).compute()
-    iow_detr=detrend_across_time(sst_anom_iow).compute()
+    # 4. Spatial average, not needed here
+    #region_avg = spatial_average(region_detr)
 
-    #filter high freqs
-    print('Start lowpass')
-    ioe_filtered=lowpass_filter(ioe_detr)
-    iow_filtered=lowpass_filter(iow_detr)
+    # 5. Standardize
+    region_std = standardize(region_detr)
 
-    #filter plot compared to no filter
-    ioe_filtered['sst'].plot(x='forecast_reference_time', marker='.', linestyle='none', label='East Indian Ocean SST 7 year filtered') 
-    ioe_detr['sst'].plot(x='forecast_reference_time', marker='.', linestyle='none', label='East Indian Ocean SST no filter')
-    plt.legend()
-    plt.grid()
-    plt.savefig('Index_comp/East_Indian_Ocean_SST.pdf', bbox_inches='tight')
+    #6. Mask sea, not needed for Z500
+    #region_mask= sea_mask(region_std)
+    region_mask=region_std
+
+    return region_mask
+
+
+# Southern South America
+#lat=(-20,-55),lon=slice(-76,-49)
+# Original longitude: -76 to -49
+# In 0..360: 284 to 311
+SOUTH_HS={'lat_min':-90,
+          'lat_max':0,
+          'lon_min':0,
+          'lon_max':360}
+
+# SSA temperature, SON and DJF
+z500_ssavg_SON = process_region(SON_mean[["z"]], **SOUTH_HS)
+z500_ssavg_DJF = process_region(DJF_mean[["z"]], **SOUTH_HS)
+
+
+#plot mean maps
+
+for i, array in enumerate([z500_ssavg_SON, z500_ssavg_DJF]):
+    fig = plt.figure(figsize=(6, 8))
+
+    var='z'
+    var_name='Z500'
+
+    if (i%2)==0:
+        season='SON'
+    else:
+        season='DJF'
+
+    ax = plt.axes(projection=ccrs.PlateCarree())
+
+    array.mean(dim='sample', skipna=True)[var].plot(
+        ax=ax,
+        transform=ccrs.PlateCarree(),
+        cmap="RdBu_r",
+        levels=10
+    )
+
+    ax.coastlines()
+
+    ax.set_title(f"{var_name} {season} mean map")
+
+    plt.savefig(f"Index_comp/{var_name}_mean_field_{season}.jpg", dpi=300, bbox_inches="tight")
     plt.close()
-    iow_filtered['sst'].plot(x='forecast_reference_time', marker='.', linestyle='none',label='West Indian Ocean SST 7 year filtered')
-    iow_detr['sst'].plot(x='forecast_reference_time', marker='.', linestyle='none', label='West Indian Ocean SST no filter')
-    plt.legend()
-    plt.grid()
-    plt.savefig('Index_comp/West_Indian_Ocean_SST.pdf', bbox_inches='tight')
-    plt.close()
 
-    #smooth and compute IOD index
+print('Plotting done!')
 
-    #!modifications to try without filtering!
-    iode_smoothed=ioe_detr.rolling(sample=3, center=True).mean()
-    iodw_smoothed=iow_detr.rolling(sample=3, center=True).mean()
-    iod_index=iodw_smoothed-iode_smoothed
-
-    print(np.nanmean(iod_index['sst']), np.nanstd(iod_index['sst']))
-    print('Max:',np.nanmax(iod_index['sst']), 'Min:', np.nanmin(iod_index['sst']))
-
-    iod_index_ssavg=standardize(iod_index).rename({'sst':'iod_index'})
-
-    print(np.nanmean(iod_index_ssavg['iod_index']), np.nanstd(iod_index_ssavg['iod_index']))
-    print('Max:',np.nanmax(iod_index_ssavg['iod_index']), 'Min:', np.nanmin(iod_index_ssavg['iod_index']))
-    print('IOD index computed')
-    return iod_index_ssavg
-
-################################################################
-#Start ENSO and IOD comp
-
-sst_SON=SON_mean[['sst']]
-sst_DJF=DJF_mean[['sst']]
-nino_SON=ENSO_process(sst_SON)
-nino_DJF=ENSO_process(sst_DJF)
-IOD_SON=IOD_process(sst_SON)
+def rename_precip(ds):
+    if 'tprate' in ds.data_vars:
+        ds = ds.rename({"tprate": "tp"})
+    return ds
 
 
-fig=plt.figure(figsize=(10, 4))
 
-nino_SON["nino34"].plot(
-    x="forecast_reference_time",
-    marker=".",
-    linestyle="none",
-    label="ENSO SON", alpha=.5
-)
-plt.close()
-
-nino_DJF["nino34"].plot(
-    x="forecast_reference_time",
-    marker=".",
-    linestyle="none",
-    label="ENSO DJF", alpha=.5
-)
-
-plt.axhline(0, color="black", linestyle="dashed")
-plt.legend()
-plt.title("ENSO index")
-
-fig.savefig('Index_comp/ENSO_index.jpg', dpi=300)
-plt.close()
-
-fig2=plt.figure(figsize=(6,6))
-IOD_SON['iod_index'].plot(x='forecast_reference_time',
-                          marker='.', linestyle='none', label='IOD SON')
-plt.axhline(0, color='black', linestyle='dashed')
-plt.legend()
-fig2.savefig('Index_comp/IOD_index.jpg')
-plt.close()
-
-## save ocean drivers in nc file
 save_path='/climca/people/glattus/'
 save_folder='Hindcast_data_ready'
 
-#save SON indices
-ds_ocean_SON=xr.merge([IOD_SON, nino_SON])
-ds_ocean_SON=ds_ocean_SON.reset_index('sample')
-encoding_ocean = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_SON.data_vars}
-ds_ocean_SON.to_netcdf(save_path+save_folder+'/ENSO_IOD_SON.nc', encoding=encoding_ocean)
-print('Spring data saved!')
+
+##Z500 
+ds_Andes_SON=z500_ssavg_SON
+ds_Andes_DJF=z500_ssavg_DJF
+
+#reset index
+ds_Andes_SON=ds_Andes_SON.reset_index('sample')
+ds_Andes_DJF=ds_Andes_DJF.reset_index('sample')
+
+print('Safety checks!')
+print("Shape:", ds_Andes_SON.shape)
+print("Size (GB):", ds_Andes_SON.nbytes / 1024**3)
+print("Finite:", np.isfinite(ds_Andes_SON).all())
+print("NaNs:", np.isnan(ds_Andes_SON).sum())
+print("Infs:", np.isinf(ds_Andes_SON).sum())
 
 
+#print(ds_Andes_SON)
+encoding = {var: {"zlib": True, "complevel": 4} for var in ds_Andes_SON.data_vars}
 
-#####################################################################
-#Additional functions for summer indian ocean mode comp
-#####################################################################
+ds_Andes_DJF.to_netcdf(save_path+save_folder+'/Z500_DJF_areas.nc', encoding=encoding)
+print('Summer Southern Hemisphere field saved')
+ds_Andes_SON.to_netcdf(save_path+save_folder+'/Z500_SON_areas.nc', encoding=encoding)
+print('Spring Southern Hemisphere field saved')
 
-def plot_eof1(Vt, X_2d, title="EOF1 pattern"):
-    eof1 = Vt[0, :]
-
-    eof1_map = xr.DataArray(
-        eof1,
-        coords={"space": X_2d.space},
-        dims=["space"],
-        name="EOF1"
-    ).unstack("space")
-
-    eof1_map.plot(cmap='RdBu')
-    plt.title(title)
-    plt.savefig('Index_comp/EOF1_IOBW')
-    plt.close()
-    return eof1_map
-
-def plot_pc1(pc1_ts, title="PC1 time series"):
-    pc1_ts.plot(x='forecast_reference_time',
-                          marker='.', linestyle='none', label='IOB DJF')
-    plt.axhline(0, color='black', linestyle='dashed')
-    plt.legend()
-    plt.title(title)
-    plt.savefig('Index_comp/PC1_IOBW.jpg')
-    plt.close()
+print('All saved!')
 
 
-def IOBW_process(sst):
-
-    # 1. Select Indian Ocean region
-    sst_io_whole = select_region(
-        sst,
-        lat_max=26,
-        lat_min=-26,
-        lon_max=120,
-        lon_min=30
-    ).sortby("latitude", ascending=True)
-
-    # 2. Anomaly
-    sst_anom = compute_sample_anomaly(sst_io_whole)
-    print("Anomaly computed")
-
-    # 3. Detrend
-    sst_detr = detrend_across_time(sst_anom)
-
-    # 4. Latitude weighting (IMPORTANT: apply on grid, not sample)
-    sst_weighted = weight_by_latitude(sst_detr)
-    print('Weighted by latitude')
-    X = sst_weighted["sst"]
-
-    X_2d = X.stack(space=("latitude", "longitude"))
-    X_2d = X_2d.transpose("sample", "space")
-    X_2d = X_2d.fillna(np.nanmean(X_2d))
-
-
-    print('Safety checks!')
-    print("Shape:", X_2d.shape)
-    print("Size (GB):", X_2d.nbytes / 1024**3)  
-    print("Finite:", np.isfinite(X_2d).all())
-    print("NaNs:", np.isnan(X_2d).sum())
-    print("Infs:", np.isinf(X_2d).sum())
-    
-    
-    print("Performing PCA...")
-
-    # 7. SVD / PCA
-    U, S, Vt = perform_svd(X_2d.values)
-
-    print(U.shape, S.shape, Vt.shape)
-    eof1_map = plot_eof1(Vt, X_2d)
-    print('Vt max, min:', np.nanmax(Vt), np.nanmin(Vt))
-    print('EOF1 max, min:', np.nanmax(eof1_map), np.nanmin(eof1_map))
-    print('U max, min:', np.nanmax(U[:,0]), np.nanmin(U[:,0]))
-    print('S max, min:', np.nanmax(S[0]), np.nanmin(S[0]))
-
-    print(
-    "First 10 variance fractions:",
-    S[:10]**2 / np.sum(S**2)
-    )
-
-    # 8. PC1 time series
-    PC1 = U[:, 0] * S[0]
-
-    PC1_ts = xr.DataArray(
-        PC1,
-        coords={"sample": X_2d.sample},
-        dims=["sample"],
-        name="IOBW"
-    )
-
-    # 9. Sign convention
-    #maybe not here? because EOF is reversed in sign compared to ERA5 analysis -->- was eliminated (16092026)
-    PC1_ts = PC1_ts - PC1_ts.mean(dim="sample")
-
-    print('max, min', np.nanmax(PC1_ts), np.nanmin(PC1_ts))
-    print(PC1_ts.std(), PC1_ts.mean())
-
-    # 10. Standardization
-    IOBW_index = standardize(PC1_ts)
-    plot_pc1(IOBW_index)
-    
-    print("PCA finished")
-
-    return IOBW_index
-
-
-IOBW_index=IOBW_process(sst_DJF)
-print('IOBW computation finished!')
-
-
-#save the DJF indices
-ds_ocean_DJF=xr.merge([IOBW_index, nino_DJF])
-ds_ocean_DJF=ds_ocean_DJF.reset_index('sample')
-encoding_ocean_DJF = {var: {"zlib": True, "complevel": 4} for var in ds_ocean_DJF.data_vars}
-ds_ocean_DJF.to_netcdf(save_path+save_folder+'/ENSO_IOB_DJF.nc', encoding=encoding_ocean_DJF)
-
-print('Summer data saved!')
+print('Z500 Fields Computation finished!')

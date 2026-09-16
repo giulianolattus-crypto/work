@@ -3,21 +3,6 @@ import pandas as pd
 import xarray as xr
 
 
-DATADIR = "/climca/data/SEAS5_SA/data"
-
-ds = xr.open_dataset(
-    DATADIR + "/seas5_daily_u_component_wind_50hPa_AugInit.nc"
-    , decode_cf=False
-    ,
-    chunks={
-        "number": 1,
-        "forecast_reference_time": 10,
-        "forecast_period": -1,
-    }
-)
-
-u = ds
-
 # keep October-Jan forecast window:
 # 1440 h = 60 days
 # 3600 h = 150 days
@@ -28,9 +13,6 @@ u = ds
 #    )
 #)
 
-import numpy as np
-import pandas as pd
-import xarray as xr
 
 DATADIR = "/climca/data/SEAS5_SA/data"
 
