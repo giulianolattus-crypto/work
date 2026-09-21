@@ -310,7 +310,8 @@ def plot_map(
     fontsize=14,
     smooth=False,
     max_abs=None,
-    stations=None
+    stations=None,
+    BF=None, R2_plot=False
 ):
     """
     Plot a regional map using only the spatial extent of da with PlateCarree.
@@ -349,7 +350,11 @@ def plot_map(
         vmax=cbar_each
     if levels is None:
         levels = np.arange(-3, 3.01, 0.5)  # include +3
-    cmap_mod=modified_colorbar(cmap, levels, center_zero=True)
+    if R2_plot==False:
+        cmap_mod=modified_colorbar(cmap, levels, center_zero=True)
+    else:
+        cmap_mod=cmap
+
     norm = BoundaryNorm(levels, ncolors=cmap_mod.N, clip=True)
 
     
@@ -412,12 +417,81 @@ def plot_map(
                    edgecolors='black', 
                 transform=ccrs.PlateCarree(), label='Stations')
     
-    return cs, sc
+        return cs, sc
+
+    # Significance overlay
+    if BF is not None:
+
+            #for now include basic stipping according to 0.8 of probability mass of distribution
+            lon=BF.longitude.values
+            lat=BF.latitude.values
+
+            lon2d, lat2d = np.meshgrid(lon, lat)
+            
+            ax.scatter(
+                lon2d[BF], lat2d[BF],
+                 s=1, color='k', marker='.', alpha=0.6
+            )
+            
+            # # ============================
+            # # BF thresholds (UPDATED)
+            # # ============================
+            # bf_main = 3        # moderate evidence
+            # bf_strong = 100    # strong evidence
+            # bf_null = 1/3      # evidence for null
+    
+            # # Moderate evidence contour
+            # cs_main = ax.contour(
+            #     BF['lon'], BF['lat'], BF,
+            #     levels=[bf_main],
+            #     colors='k',
+            #     linewidths=1
+            # )
+    
+            # # Strong evidence contour
+            # cs_strong = ax.contour(
+            #     BF['lon'], BF['lat'], BF,
+            #     levels=[bf_strong],
+            #     colors='k',
+            #     linewidths=2
+            # )
+    
+            # # Evidence for null
+            # cs_neg = ax.contour(
+            #     BF['lon'], BF['lat'], BF,
+            #     levels=[bf_null],
+            #     colors='k',
+            #     linewidths=1,
+            #     linestyles='dashed'
+            # )
+    
+            # # ============================
+            # # Stippling
+            # # ============================
+            # lon2d, lat2d = np.meshgrid(lon, lat)
+    
+            # moderate = BF > bf_main
+            # strong = BF > bf_strong
+    
+            # # Moderate evidence → dots
+            # ax.scatter(
+            #     lon2d[moderate], lat2d[moderate],
+            #     s=1, color='k', marker='.', alpha=0.6
+            # )
+    
+            # # Strong evidence → crosses
+            # ax.scatter(
+            #     lon2d[strong], lat2d[strong],
+            #     s=2, color='k', marker='x', alpha=0.7
+            # )
+
+    else:
+        return cs
 
 ###############################################################################################
 #         
 def subplots_map(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.1, \
-                 cbar_each=None, heading=None, global_max_val=0.0, stations=None):
+                 cbar_each=None, heading=None, global_max_val=0.0, stations=None, BF=None, R2_plot=False):
     cs_list=[]
     fontsize=16
     
@@ -439,12 +513,16 @@ def subplots_map(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.
     step = steps # or 0.25 if you prefer
     max_abs = np.ceil(global_max / step) * step
     #print(max_abs)
-    #levels = np.round(np.arange(-max_abs, max_abs + step, step), decimals=2)  
-    levels = np.linspace(
-    -max_abs,
-    max_abs,
-    int(2 * max_abs / step) + 1
-    )
+    #levels = np.round(np.arange(-max_abs, max_abs + step, step), decimals=2) 
+     
+    if R2_plot:
+        levels=np.arange(0.,1.1,step)
+    else:
+        levels = np.linspace(
+                    -max_abs,
+                    max_abs,
+                    int(2 * max_abs / step) + 1
+                    )
     
     ##Find optimal figsize
     width_per_plot = 4
@@ -454,22 +532,49 @@ def subplots_map(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.
     fig.subplots_adjust(top=0.8)
     
     for j, da in enumerate(ds):
+
+        if BF is not None:
+            BF_da=BF[j]
+            
+        else:
+            BF_da=None
+            
+
+        if stations is not None:
+            cs=plot_map( #get the colorbar for each subplot
+            i=j+1,
+            da=da,
+            pval=None,
+            title=title_list[j],
+            units=unit,
+            cbar_each=global_max,
+            fig=fig,
+            subplts_num=len(ds),
+            cmap=cmap,
+            levels=levels,
+            smooth=False,
+            fontsize=fontsize,
+            stations=stations[j], 
+            max_abs=max_abs,
+            BF=BF_da, R2_plot=R2_plot)
         
-        cs=plot_map( #get the colorbar for each subplot
-        i=j+1,
-        da=da,
-        pval=None,
-        title=title_list[j],
-        units=unit,
-        cbar_each=global_max,
-        fig=fig,
-        subplts_num=len(ds),
-        cmap=cmap,
-        levels=levels,
-        smooth=False,
-        fontsize=fontsize,
-        stations=stations[j], 
-        max_abs=max_abs)
+        else:
+            cs=plot_map( #get the colorbar for each subplot
+                        i=j+1,
+                        da=da,
+                        pval=None,
+                        title=title_list[j],
+                        units=unit,
+                        cbar_each=global_max,
+                        fig=fig,
+                        subplts_num=len(ds),
+                        cmap=cmap,
+                        levels=levels,
+                        smooth=False,
+                        fontsize=fontsize,
+                        stations=None, 
+                        max_abs=max_abs,
+                        BF=BF_da, R2_plot=R2_plot)
         
         cs_list.append(cs)
     
@@ -480,7 +585,10 @@ def subplots_map(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.
     
     if not cbar_each:
         #modify colorbar
-        cmap_mod = modified_colorbar(cmap, levels, center_zero=True)
+        if R2_plot:
+            cmap_mod=cmap
+        else:
+            cmap_mod = modified_colorbar(cmap, levels, center_zero=True)
 
         # create independent global norm
         global_norm = BoundaryNorm(levels, ncolors=cmap_mod.N, clip=True)
@@ -490,7 +598,7 @@ def subplots_map(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.
         
         cbar_ax = fig.add_axes([0.2, 0.08, 0.6, 0.03])
         cbar = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
-        ticks = np.arange(-max_abs, max_abs + step, step*2)  
+        ticks = np.arange(levels[0], levels[-1] + step, step*2)  
         cbar.set_ticks(ticks)
         cbar.ax.tick_params(labelsize=fontsize)
         cbar.set_label(unit, fontsize=fontsize)
@@ -516,6 +624,8 @@ def plot_map_circ(
     pval=None,
     fontsize=14,
     smooth=False,
+    BF=None,
+    R2_plot=False
 ):
     """
     Plot a regional map using only the spatial extent of da with PlateCarree.
@@ -548,7 +658,12 @@ def plot_map_circ(
         vmax=cbar_each
     if levels is None:
         levels = np.arange(-3, 3.01, 0.5)  # include +3
-    cmap_mod=modified_colorbar(cmap, levels, center_zero=True)
+
+    if R2_plot==False:
+        cmap_mod=modified_colorbar(cmap, levels, center_zero=True)
+    else:
+        cmap_mod=cmap
+    
     norm = BoundaryNorm(levels, ncolors=cmap_mod.N, clip=True)
 
     
@@ -589,10 +704,26 @@ def plot_map_circ(
             linestyle="None",
             transform=ccrs.PlateCarree(),
         )
+
+    # Significance overlay
+    if BF is not None:
+    
+                #for now include basic stipping according to 0.8 of probability mass of distribution
+                lon=BF.longitude.values
+                lat=BF.latitude.values
+    
+                lon2d, lat2d = np.meshgrid(lon, lat)
+                
+                ax.scatter(
+                    lon2d[BF], lat2d[BF],
+                     s=1, color='k', marker='.', alpha=0.6
+                )
     return cs
 
         
-def subplots_map_circ(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', steps=0.1, cbar_each=None, heading=None):
+def subplots_map_circ(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', 
+                      steps=0.1, cbar_each=None, heading=None,
+                      BF=None, R2_plot=False):
     cs_list=[]
     fontsize=16
     global_max=0
@@ -604,16 +735,33 @@ def subplots_map_circ(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', ste
     step = steps # or 0.25 if you prefer
     max_abs = np.ceil(global_max / step) * step
     #print(max_abs)
-    levels = np.arange(-max_abs, max_abs + step, step)  
+
+    if R2_plot:
+        levels=np.arange(0.,1.1,step)
+    else:
+        levels = np.linspace(
+                        -max_abs,
+                        max_abs,
+                        int(2 * max_abs / step) + 1
+                        )
+
+    #levels = np.arange(-max_abs, max_abs + step, step)  
      
     ##Find optimal figsize
     width_per_plot = 12
     height = 5
 
-    fig = plt.figure(figsize=(width_per_plot, len(ds)*height))
+    fig = plt.figure(figsize=(width_per_plot, len(ds)*height+3))
     fig.subplots_adjust(top=0.8)
     
     for j, da in enumerate(ds):
+
+        if BF is not None:
+            BF_da=BF[j]
+                    
+        else:
+            BF_da=None
+
         cs=plot_map_circ( #get the colorbar for each subplot
         i=j+1,
         da=da,
@@ -626,7 +774,9 @@ def subplots_map_circ(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', ste
         cmap=cmap,
         levels=levels,
         smooth=False,
-        fontsize=fontsize)
+        fontsize=fontsize,
+        BF=BF_da,
+        R2_plot=R2_plot)
         
         cs_list.append(cs)
     
@@ -637,8 +787,11 @@ def subplots_map_circ(ds, title_list, cmap=plt.cm.RdBu.reversed(), unit='K', ste
     
     if not cbar_each:
         #modify colorbar
-        cmap_mod = modified_colorbar(cmap, levels, center_zero=True)
-
+        if R2_plot:
+            cmap_mod=cmap
+        else:
+            cmap_mod = modified_colorbar(cmap, levels, center_zero=True)
+       
         # create independent global norm
         global_norm = BoundaryNorm(levels, ncolors=cmap_mod.N, clip=True)
 
