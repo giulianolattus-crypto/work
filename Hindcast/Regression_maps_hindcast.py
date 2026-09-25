@@ -35,11 +35,6 @@ target_SON_xr=xr.open_dataset(PATH+'/Target_vars_SON_areas.nc')
 
 target_DJF_xr=xr.open_dataset(PATH+'/Target_vars_DJF_areas.nc')
 
-#Z500 data
-z500_SON_xr=xr.open_dataset(PATH+'/Z500_SON_areas.nc')
-z500_DJF_xr=xr.open_dataset(PATH+'/Z500_DJF_areas.nc')
-
-
 #function for excluding ssw years
 def exclude_years(ds, years_list=[2002,2019]):
     years = ds.forecast_reference_time.dt.year.compute()
@@ -481,15 +476,14 @@ def align_hindcast_arrays(
 
 print('Aligning hindcast arrays!')
 #spring
-all_aligned=align_hindcast_arrays([target_SON_xr,  z500_SON_xr, 
+all_aligned=align_hindcast_arrays([target_SON_xr, 
                                    ocean_SON_xr, SPV_SON_xr, SAM_SON_xr], 
                                   years_list=[2002,2019],
-                                  names=['Target', 'z500',
+                                  names=['Target',
                                           'ocean', 'SPV', 'SAM'])
 
 target_SON_xr=all_aligned[0]
-z500_SON_xr=all_aligned[1]
-drivers_aligned=all_aligned[2:]
+drivers_aligned=all_aligned[1:]
 drivers_SON_xr=xr.merge(drivers_aligned)
 print(target_SON_xr.sizes)
 print('Spring aligned!')
@@ -505,7 +499,6 @@ print(init_sel)
 
 djf_list = [
     target_DJF_xr.drop_vars(['lead_block', 'season']),
-    z500_DJF_xr.drop_vars(['pressure_level', 'lead_block', 'season']),
     ocean_DJF_xr.drop_vars(['season']),
     VB_DJF_xr,
     SAM_DJF_xr.drop_vars([ 'season'])
@@ -587,7 +580,6 @@ aligned = [
 #                                  names=['Target','z500', 'ocean', 'SPV', 'SAM'])
 
 target_DJF_xr=aligned[0]
-z500_DJF_xr=aligned[2:]
 drivers_aligned_DJF=aligned[1:]
 drivers_DJF_xr=xr.merge(drivers_aligned_DJF)
 
@@ -749,11 +741,6 @@ def bootstrap_regression_cell(
         # --------------------------------------------------------
         # Bootstrap regression
         #
-        # We deliberately do the individual regressions here.
-        # For your relatively small sample_size, this can actually
-        # be faster than constructing huge 3-D X_boot arrays,
-        # particularly inside Dask.
-        # --------------------------------------------------------
 
         for b in range(n_boot):
 
@@ -791,15 +778,9 @@ def bootstrap_regression_cell(
             except np.linalg.LinAlgError:
                 continue
 
-            # ----------------------------------------------------
-            # Coefficient of focal driver
-            # ----------------------------------------------------
 
             coef_out[b, d] = beta[focal_idx]
 
-            # ----------------------------------------------------
-            # R²
-            # ----------------------------------------------------
 
             y_hat = Xreg @ beta
 
@@ -828,11 +809,19 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
     # Make sample a single chunk
     # ------------------------------------------------------------
 
-    target = target_xr[target_var].chunk({
+    if target_var=='z':
+        target=target_xr[target_var].chunk({
+            'sample':-1,
+            'latitude':10,
+            'longitude':20
+        })
+
+    else:
+        target = target_xr[target_var].chunk({
         "sample": -1,
         "latitude": 6,
         "longitude": 6,
-    })
+        })
 
     
 
@@ -893,7 +882,8 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
     #stippling
     prob_positive = (coef > 0).mean(dim="bootstrap", skipna=True)
     prob_negative = (coef < 0).mean(dim="bootstrap", skipna=True)
-        
+
+    # | is the or operator 
     significant = (prob_positive >= 0.8) | (prob_negative >= 0.8)
 
     significant=significant.transpose('driver', 'latitude', 'longitude')
@@ -916,33 +906,7 @@ r2_SON_precip_direct, coef_SON_precip_direct, significant_SON_precip_direct=boot
 r2_SON_precip_total, coef_SON_precip_total, significant_SON_precip_total=bootstrap_map(target_SON_xr, drivers_SON_xr,
                                                            driver_vars_tot, target_var='tp', n_boot=100,
                                                         sample_size=200, total_eff=True)
-
-
-print('Precip SON maps done!')
-
-r2_SON_temp_direct, coef_SON_temp_direct, significant_SON_temp_direct=bootstrap_map(target_SON_xr, drivers_SON_xr, 
-                                                       driver_vars_SON, target_var='t2m', n_boot=100,
-                                                         sample_size=200, total_eff=False)
-
-r2_SON_temp_total, coef_SON_temp_total, significant_SON_temp_total=bootstrap_map(target_SON_xr, drivers_SON_xr,
-                                                     driver_vars_tot, target_var='t2m', n_boot=100,
-                                                        sample_size=200, total_eff=True)
-
-print('Temp SON maps done!')
-
-r2_SON_z500_direct, coef_SON_z500_direct, significant_SON_z500_direct=bootstrap_map(z500_SON_xr, drivers_SON_xr,
-                                                       driver_vars_SON, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=False)
-r2_SON_z500_total, coef_SON_z500_total, significant_SON_z500_total=bootstrap_map(z500_SON_xr, drivers_SON_xr,
-                                                     driver_vars_tot, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=True)
-
-print('Z500 SON maps done!')
-
-#########################################################################################################################
-#Coefficient maps
-print('Plotting Coeffs SON')
-
+#Coef maps
 subplots_map(ds=coef_SON_precip_direct, title_list=driver_vars_SON, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Precipitation SON',
                    stations=None, BF=significant_SON_precip_direct)
@@ -953,21 +917,8 @@ subplots_map(ds=coef_SON_precip_total, title_list=driver_vars_tot, cmap=plt.cm.B
                    stations=None, BF=significant_SON_precip_total)
 plt.close()
 
-subplots_map(ds=coef_SON_temp_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                 cbar_each=None, heading='Mean regression coefficients Temperature SON',
-                   stations=None, BF=significant_SON_temp_direct)
-plt.close()
-
-subplots_map(ds=coef_SON_temp_total, title_list=driver_vars_tot, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                 cbar_each=None, heading='Mean regression coefficients Temperature Total SON',
-                   stations=None, BF=significant_SON_temp_total)
-plt.close()
-
-###########################################################################################################################
-#R2 maps SON
-print('Plotting R2 SON')
+#R2 precip SON maps
 cmap_r2=plt.cm.PuOr
-
 subplots_map(ds=r2_SON_precip_direct, title_list=driver_vars_SON, cmap=cmap_r2, unit=' ', steps=0.1, \
                  cbar_each=None, heading='Mean R2 Precipitation SON',
                    stations=None, R2_plot=True)
@@ -979,6 +930,27 @@ subplots_map(ds=r2_SON_precip_total, title_list=driver_vars_tot, cmap=cmap_r2, u
                    stations=None, R2_plot=True)
 plt.close()
 
+print('Precip SON maps done!')
+
+r2_SON_temp_direct, coef_SON_temp_direct, significant_SON_temp_direct=bootstrap_map(target_SON_xr, drivers_SON_xr, 
+                                                       driver_vars_SON, target_var='t2m', n_boot=100,
+                                                         sample_size=200, total_eff=False)
+
+r2_SON_temp_total, coef_SON_temp_total, significant_SON_temp_total=bootstrap_map(target_SON_xr, drivers_SON_xr,
+                                                     driver_vars_tot, target_var='t2m', n_boot=100,
+                                                        sample_size=200, total_eff=True)
+
+subplots_map(ds=coef_SON_temp_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+                 cbar_each=None, heading='Mean regression coefficients Temperature SON',
+                   stations=None, BF=significant_SON_temp_direct)
+plt.close()
+
+subplots_map(ds=coef_SON_temp_total, title_list=driver_vars_tot, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+                 cbar_each=None, heading='Mean regression coefficients Temperature Total SON',
+                   stations=None, BF=significant_SON_temp_total)
+plt.close()
+
+#R2 Temp maps
 
 subplots_map(ds=r2_SON_temp_direct, title_list=driver_vars_SON, cmap=cmap_r2, unit=' ', steps=0.1, \
                  cbar_each=None, heading='Mean R2 Temperature SON',
@@ -990,23 +962,9 @@ subplots_map(ds=r2_SON_temp_total, title_list=driver_vars_tot, cmap=cmap_r2, uni
                    stations=None, R2_plot=True)
 plt.close()
 
-#plotting for z500 SON
-subplots_map_circ(ds=coef_SON_z500_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, units='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 SON', BF=significant_SON_z500_direct)
-plt.close()
 
-subplots_map_circ(ds=r2_SON_z500_direct, title_list=driver_vars_SON, cmap=cmap_r2, units=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 SON', R2_plot=True)
-plt.close()
+print('Temp SON maps done!')
 
-#Z500 Total
-subplots_map_circ(ds=coef_SON_z500_total, title_list=driver_vars_tot, cmap=plt.cm.RdBu_r, units='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 SON Total', BF=significant_SON_z500_total)
-plt.close()
-
-subplots_map_circ(ds=r2_SON_z500_total, title_list=driver_vars_tot, cmap=cmap_r2, units=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 SON Total', R2_plot=True)
-plt.close()
 
 print('Start DJF maps!')
 
@@ -1022,30 +980,6 @@ r2_DJF_precip_total, coef_DJF_precip_total, significant_DJF_precip_total=bootstr
                                                            driver_vars_tot_DJF, target_var='tp', n_boot=100,
                                                         sample_size=200, total_eff=True)
 
-print('Precip DJF maps done!')
-
-r2_DJF_temp_direct, coef_DJF_temp_direct, significant_DJF_temp_direct=bootstrap_map(target_DJF_xr, drivers_DJF_xr, 
-                                                       driver_vars_DJF, target_var='t2m', n_boot=100,
-                                                         sample_size=200, total_eff=False)
-
-r2_DJF_temp_total, coef_DJF_temp_total, significant_DJF_temp_total=bootstrap_map(target_DJF_xr, drivers_DJF_xr,
-                                                     driver_vars_tot_DJF, target_var='t2m', n_boot=100,
-                                                        sample_size=200, total_eff=True)
-
-print('Temp DJF maps done!')
-
-r2_DJF_z500_direct, coef_DJF_z500_direct, significant_DJF_z500_direct=bootstrap_map(z500_DJF_xr, drivers_DJF_xr,
-                                                       driver_vars_DJF, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=False)
-r2_DJF_z500_total, coef_DJF_z500_total, significant_DJF_z500_total=bootstrap_map(z500_DJF_xr, drivers_DJF_xr,
-                                                     driver_vars_tot_DJF, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=True)
-
-print('Z500 DJF maps done!')
-
-#Coef maps
-
-print('Plotting Coeffs DJF')
 subplots_map(ds=coef_DJF_precip_direct, title_list=driver_vars_DJF, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Precipitation DJF',
                    stations=None, BF=significant_DJF_precip_direct)
@@ -1056,19 +990,6 @@ subplots_map(ds=coef_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=plt.
                    stations=None, BF=significant_DJF_precip_total)
 plt.close()
 
-subplots_map(ds=coef_DJF_temp_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                 cbar_each=None, heading='Mean regression coefficients Temperature DJF',
-                   stations=None, BF=significant_DJF_temp_direct)
-plt.close()
-
-subplots_map(ds=coef_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                 cbar_each=None, heading='Mean regression coefficients Temperature Total DJF',
-                   stations=None, BF=significant_DJF_temp_total)
-plt.close()
-
-############################################################################################################################
-#R2 maps
-print('Plotting R2 DJF')
 subplots_map(ds=r2_DJF_precip_direct, title_list=driver_vars_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
                  cbar_each=None, heading='Mean R2 Precipitation DJF',
                    stations=None, R2_plot=True)
@@ -1077,6 +998,26 @@ plt.close()
 subplots_map(ds=r2_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
                  cbar_each=None, heading='Mean R2 Precipitation Total DJF',
                    stations=None, R2_plot=True)
+plt.close()
+
+print('Precip DJF maps done!')
+
+r2_DJF_temp_direct, coef_DJF_temp_direct, significant_DJF_temp_direct=bootstrap_map(target_DJF_xr, drivers_DJF_xr, 
+                                                       driver_vars_DJF, target_var='t2m', n_boot=100,
+                                                         sample_size=200, total_eff=False)
+
+r2_DJF_temp_total, coef_DJF_temp_total, significant_DJF_temp_total=bootstrap_map(target_DJF_xr, drivers_DJF_xr,
+                                                     driver_vars_tot_DJF, target_var='t2m', n_boot=100,
+                                                        sample_size=200, total_eff=True)
+
+subplots_map(ds=coef_DJF_temp_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+                 cbar_each=None, heading='Mean regression coefficients Temperature DJF',
+                   stations=None, BF=significant_DJF_temp_direct)
+plt.close()
+
+subplots_map(ds=coef_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+                 cbar_each=None, heading='Mean regression coefficients Temperature Total DJF',
+                   stations=None, BF=significant_DJF_temp_total)
 plt.close()
 
 subplots_map(ds=r2_DJF_temp_direct, title_list=driver_vars_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
@@ -1089,23 +1030,7 @@ subplots_map(ds=r2_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=cmap_r2,
                    stations=None, R2_plot=True)
 plt.close()
 
-## Z500 DJF maps
-print('Plotting Z500 maps DJF!')
-subplots_map_circ(ds=coef_DJF_z500_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, units='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 DJF', BF=significant_DJF_z500_direct)
-plt.close()
+print('Temp DJF maps done!')
 
-subplots_map_circ(ds=r2_DJF_z500_direct, title_list=driver_vars_DJF, cmap=cmap_r2, units=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 DJF', R2_plot=True)
-plt.close()
-
-#Z500 Total
-subplots_map_circ(ds=coef_DJF_z500_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.RdBu_r, units='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 DJF Total', BF=significant_DJF_z500_total)
-plt.close()
-
-subplots_map_circ(ds=r2_DJF_z500_total, title_list=driver_vars_tot_DJF, cmap=cmap_r2, units=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 DJF Total', R2_plot=True)
-plt.close()
 
 print('All regression maps done!')

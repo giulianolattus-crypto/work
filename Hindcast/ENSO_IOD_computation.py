@@ -705,7 +705,7 @@ def plot_eof1(Vt, X_2d, title="EOF1 pattern"):
         name="EOF1"
     ).unstack("space")
 
-    eof1_map.plot(cmap='RdBu')
+    eof1_map.plot(cmap='RdBu_r')
     plt.title(title)
     plt.savefig('Index_comp/EOF1_IOBW')
     plt.close()
