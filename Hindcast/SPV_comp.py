@@ -540,7 +540,7 @@ def SPV_process(ds_50):
     #smoothen
     vortex_smoothed = polar_vortex_detr.sortby("forecast_reference_time")
 
-    vortex_smoothed = vortex_smoothed.rolling(sample=3, center=True).mean()
+    vortex_smoothed = vortex_smoothed #.rolling(sample=3, center=True).mean()
 
     #normalise
     SPV_index=standardize(vortex_smoothed)
