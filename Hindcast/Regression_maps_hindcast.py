@@ -925,12 +925,12 @@ plt.close()
 cmap_std=plt.cm.managua
 subplots_map(ds=std_SON_precip_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation SON',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 subplots_map(ds=std_SON_precip_total, title_list=driver_vars_tot, cmap=cmap_std, unit='mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation Total SON',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 #R2 precip SON maps
@@ -969,12 +969,12 @@ plt.close()
 #Std maps
 subplots_map(ds=std_SON_temp_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature SON',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 subplots_map(ds=std_SON_temp_total, title_list=driver_vars_tot, cmap=cmap_std, unit='K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature Total SON',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 #R2 Temp maps
@@ -1019,12 +1019,12 @@ plt.close()
 
 subplots_map(ds=std_DJF_precip_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation DJF',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 subplots_map(ds=std_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation Total DJF',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 subplots_map(ds=r2_DJF_precip_direct, title_list=driver_vars_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
@@ -1059,12 +1059,12 @@ plt.close()
 
 subplots_map(ds=std_DJF_temp_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature DJF',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 subplots_map(ds=std_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature Total DJF',
-                   stations=None)
+                   stations=None, R2_plot=True)
 plt.close()
 
 subplots_map(ds=r2_DJF_temp_direct, title_list=driver_vars_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \

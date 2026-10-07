@@ -633,9 +633,10 @@ def modify_driver_list(driver_list, total_eff=False):
 def bootstrap_regression_cell(
     y,
     drivers,
+    years,
     driver_vars,
     n_boot=500,
-    sample_size=200,
+    sample_size=None,
     add_intercept=True,
     seed=42,
     total_eff=False,
@@ -643,6 +644,34 @@ def bootstrap_regression_cell(
 
     n_samples = y.shape[0]
     n_drivers = len(driver_vars)
+
+    # ------------------------------------------------------------
+    # Check dimensions
+    # ------------------------------------------------------------
+
+    if len(years) != n_samples:
+        raise ValueError(
+            f"Length of years ({len(years)}) does not match "
+            f"number of observations ({n_samples})."
+        )
+
+    if drivers.shape[1] != n_samples:
+        raise ValueError(
+            f"drivers has {drivers.shape[1]} observations, "
+            f"but y has {n_samples}."
+        )
+
+    # ------------------------------------------------------------
+    # Unique years
+    # ------------------------------------------------------------
+
+    unique_years = np.unique(years)
+
+    # By default, sample the same number of years as are
+    # present in the original dataset
+    if sample_size is None:
+        sample_size = len(unique_years)
+
 
     # ------------------------------------------------------------
     # Driver dictionary
@@ -680,11 +709,31 @@ def bootstrap_regression_cell(
 
     # ------------------------------------------------------------
     # RNG
-    #
-    # Important: different spatial cells get different streams.
     # ------------------------------------------------------------
 
     rng = np.random.default_rng(seed)
+
+    # ------------------------------------------------------------
+    # Generate bootstrap year samples ONCE
+    #
+    # This is important because all regression maps should use
+    # exactly the same bootstrap samples.
+    #
+    # Example:
+    #
+    # [1981, 1981, 1985, 1990, ...]
+    #
+    # means that all observations from 1981 are included twice.
+    # ------------------------------------------------------------
+
+    bootstrap_years = [
+        rng.choice(
+            unique_years,
+            size=sample_size,
+            replace=True
+        )
+        for _ in range(n_boot)
+    ]
 
     # ------------------------------------------------------------
     # Loop over focal drivers
@@ -710,6 +759,9 @@ def bootstrap_regression_cell(
 
         # --------------------------------------------------------
         # Remove NaNs once
+        #
+        # This is done before the bootstrap, just as in your
+        # original function.
         # --------------------------------------------------------
 
         valid = np.isfinite(y)
@@ -721,6 +773,7 @@ def bootstrap_regression_cell(
 
         X = X[valid]
         y_valid = y[valid]
+        years_valid = years[valid]
 
         n_valid = len(y_valid)
 
@@ -731,35 +784,60 @@ def bootstrap_regression_cell(
             continue
 
         # --------------------------------------------------------
-        # Bootstrap indices
-        # --------------------------------------------------------
-
-        indices = rng.integers(
-            0,
-            n_valid,
-            size=(n_boot, sample_size)
-        )
-
-        # --------------------------------------------------------
         # Bootstrap regression
-        #
-        # We deliberately do the individual regressions here.
-        # For your relatively small sample_size, this can actually
-        # be faster than constructing huge 3-D X_boot arrays,
-        # particularly inside Dask.
         # --------------------------------------------------------
 
         for b in range(n_boot):
 
-            idx = indices[b]
+            sampled_years = bootstrap_years[b]
+
+            # ----------------------------------------------------
+            # Construct observation indices from sampled years
+            #
+            # We explicitly loop over years so that duplicate
+            # sampled years are retained.
+            # ----------------------------------------------------
+
+            bootstrap_indices = []
+
+            for year in sampled_years:
+
+                year_indices = np.flatnonzero(
+                    years_valid == year
+                )
+
+                if len(year_indices) > 0:
+                    bootstrap_indices.append(year_indices)
+
+            # No valid observations
+            if len(bootstrap_indices) == 0:
+                continue
+
+            idx = np.concatenate(
+                bootstrap_indices
+            )
 
             Xb = X[idx]
             yb = y_valid[idx]
 
+            # ----------------------------------------------------
+            # Check number of observations
+            # ----------------------------------------------------
+
+            if len(yb) <= n_parameters:
+                continue
+
+            # ----------------------------------------------------
             # Add intercept
+            # ----------------------------------------------------
+
             if add_intercept:
+
                 Xreg = np.empty(
-                    (sample_size, n_predictors + 1),
+                    (
+                        len(yb),
+                        n_predictors + 1
+                    ),
                     dtype=np.float64
                 )
 
@@ -769,6 +847,7 @@ def bootstrap_regression_cell(
                 focal_idx = 1
 
             else:
+
                 Xreg = Xb
                 focal_idx = 0
 
@@ -777,16 +856,25 @@ def bootstrap_regression_cell(
             # ----------------------------------------------------
 
             try:
+
                 beta, residuals, rank, s = np.linalg.lstsq(
                     Xreg,
                     yb,
                     rcond=None
                 )
+
             except np.linalg.LinAlgError:
                 continue
 
             # ----------------------------------------------------
-            # Coefficient of focal driver
+            # Check rank
+            # ----------------------------------------------------
+
+            if rank < Xreg.shape[1]:
+                continue
+
+            # ----------------------------------------------------
+            # Focal coefficient
             # ----------------------------------------------------
 
             coef_out[b, d] = beta[focal_idx]
@@ -808,6 +896,7 @@ def bootstrap_regression_cell(
             )
 
             if ss_tot > 0:
+
                 r2_out[b, d] = (
                     1.0
                     - ss_res / ss_tot
@@ -816,9 +905,18 @@ def bootstrap_regression_cell(
     return r2_out, coef_out
 
 
-def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5, sample_size=200, total_eff=False):
+def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5, sample_size=8, total_eff=False):
 
-     # ------------------------------------------------------------
+    #select only first 25 ensemble members
+    target_members=np.unique(target_xr.number.values)
+    members=np.sort(target_members)
+    members_mask=members[:25]
+    target_xr=target_xr.where(target_xr.number.isin(members_mask), drop=True)
+    drivers_combi_xr=drivers_combi_xr.where(drivers_combi_xr.number.isin(members_mask), drop=True)
+
+    print(members_mask)
+
+    # ------------------------------------------------------------
     # Make sample a single chunk
     # ------------------------------------------------------------
 
@@ -844,6 +942,8 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
     ).assign_coords(
         driver=driver_vars
     )
+
+    years = target.forecast_reference_time.dt.year.values
 
     r2, coef = xr.apply_ufunc(
     bootstrap_regression_cell,
@@ -871,6 +971,7 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
         kwargs={
             "driver_vars": driver_vars,
             "n_boot": n_boot,
+            'years':years,
             "sample_size": sample_size,
             "add_intercept": True,
             "seed": 42,
@@ -897,7 +998,8 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
     prob_positive = (coef > 0).mean(dim="bootstrap", skipna=True)
     prob_negative = (coef < 0).mean(dim="bootstrap", skipna=True)
 
-    #use 95% CI  
+    # | is the or operator 
+    # use 95% CI as more strict condition
     significant = (prob_positive >= 0.95) | (prob_negative >= 0.95)
 
     significant=significant.transpose('driver', 'latitude', 'longitude')
@@ -918,35 +1020,35 @@ cmap_std=plt.cm.managua
 
 r2_SON_z500_direct, coef_SON_z500_direct, std_SON_z500_direct, significant_SON_z500_direct=bootstrap_map(z500_SON_xr, drivers_SON_xr,
                                                        driver_vars_SON, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=False)
+                                                        sample_size=8, total_eff=False)
 r2_SON_z500_total, coef_SON_z500_total, std_SON_z500_total, significant_SON_z500_total=bootstrap_map(z500_SON_xr, drivers_SON_xr,
                                                      driver_vars_tot, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=True)
+                                                        sample_size=8, total_eff=True)
 
 #plotting for z500 SON
 subplots_map_circ(ds=coef_SON_z500_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 SON', BF=significant_SON_z500_direct)
+                  cbar_each=None, heading='Yearwise mean regression coefficients Z500 SON', BF=significant_SON_z500_direct)
 plt.close()
 
 subplots_map_circ(ds=r2_SON_z500_direct, title_list=driver_vars_SON, cmap=cmap_r2, unit=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 SON', R2_plot=True)
+                  cbar_each=None, heading='Yearwise mean R2 Z500 SON', R2_plot=True)
 plt.close()
 
 subplots_map_circ(ds=std_SON_z500_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Std regression coefficient Z500 SON', R2_plot=True)
+                  cbar_each=None, heading='Yearwise std regression coefficient Z500 SON', R2_plot=True)
 plt.close()
 
 #Z500 Total
 subplots_map_circ(ds=coef_SON_z500_total, title_list=driver_vars_tot, cmap=plt.cm.RdBu_r, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 SON Total', BF=significant_SON_z500_total)
+                  cbar_each=None, heading='Yearwise mean regression coefficients Z500 SON Total', BF=significant_SON_z500_total)
 plt.close()
 
 subplots_map_circ(ds=r2_SON_z500_total, title_list=driver_vars_tot, cmap=cmap_r2, unit=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 SON Total', R2_plot=True)
+                  cbar_each=None, heading='Yearwise mean R2 Z500 SON Total', R2_plot=True)
 plt.close()
 
 subplots_map_circ(ds=std_SON_z500_total, title_list=driver_vars_tot, cmap=cmap_std, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Std regression coefficient Z500 SON Total', R2_plot=True)
+                  cbar_each=None, heading='Yearwise std regression coefficient Z500 SON Total', R2_plot=True)
 plt.close()
 
 print('Z500 SON maps done!')
@@ -959,35 +1061,35 @@ driver_vars_tot_DJF=['ENSO', 'IOBW', 'VB']
 
 r2_DJF_z500_direct, coef_DJF_z500_direct, std_DJF_z500_direct, significant_DJF_z500_direct=bootstrap_map(z500_DJF_xr, drivers_DJF_xr,
                                                        driver_vars_DJF, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=False)
+                                                        sample_size=8, total_eff=False)
 r2_DJF_z500_total, coef_DJF_z500_total, std_DJF_z500_total, significant_DJF_z500_total=bootstrap_map(z500_DJF_xr, drivers_DJF_xr,
                                                      driver_vars_tot_DJF, target_var='z', n_boot=100,
-                                                        sample_size=200, total_eff=True)
+                                                        sample_size=8, total_eff=True)
 
 subplots_map_circ(ds=coef_DJF_z500_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 DJF', BF=significant_DJF_z500_direct)
+                  cbar_each=None, heading='Yearwise mean regression coefficients Z500 DJF', BF=significant_DJF_z500_direct)
 plt.close()
 
 subplots_map_circ(ds=r2_DJF_z500_direct, title_list=driver_vars_DJF, cmap=cmap_r2, unit=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 DJF', R2_plot=True)
+                  cbar_each=None, heading='Yearwise mean R2 Z500 DJF', R2_plot=True)
 plt.close()
 
 
 subplots_map_circ(ds=std_DJF_z500_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Std regression coefficient Z500 DJF', R2_plot=True)
+                  cbar_each=None, heading='Yearwise std regression coefficient Z500 DJF', R2_plot=True)
 plt.close()
 
 #Z500 Total
 subplots_map_circ(ds=coef_DJF_z500_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.RdBu_r, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Mean regression coefficients Z500 DJF Total', BF=significant_DJF_z500_total)
+                  cbar_each=None, heading='Yearwise mean regression coefficients Z500 DJF Total', BF=significant_DJF_z500_total)
 plt.close()
 
 subplots_map_circ(ds=r2_DJF_z500_total, title_list=driver_vars_tot_DJF, cmap=cmap_r2, unit=' ', steps=0.1,
-                  cbar_each=None, heading='Mean R2 Z500 DJF Total', R2_plot=True)
+                  cbar_each=None, heading='Yearwise mean R2 Z500 DJF Total', R2_plot=True)
 plt.close()
 
 subplots_map_circ(ds=std_DJF_z500_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='gpm', steps=0.1,
-                  cbar_each=None, heading='Std regression coefficient Z500 DJF Total', R2_plot=True)
+                  cbar_each=None, heading='Yearwise std regression coefficient Z500 DJF Total', R2_plot=True)
 plt.close()
 print('Z500 DJF maps done!')
 
