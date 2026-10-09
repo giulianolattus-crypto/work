@@ -597,154 +597,177 @@ import Functions
 
 from drawing_dag import plot_causal_networks_grid, plot_causal_networks_grid_flexible
 
-def bootstrap_regression(
+def bootstrap_regression_yearwise(
     target_ds,
     driver_ds,
     target_var,
     driver_vars,
     n_boot=50,
-    sample_size=10000,
+    sample_size=None,
     add_intercept=True,
-    printer=False,
     seed=42,
-    quantiles=None,
-    total_eff=False
+    total_eff=False,
 ):
-    """
-    target_var: string, e.g. "tprate" or "t2m"
-    driver_vars: list of strings, e.g. ["nino34"] or ["nino34", "iod_index"]
-    """
 
-    results = []
+    # ------------------------------------------------------------
+    # 1. Select first 25 ensemble members
+    # ------------------------------------------------------------
 
-    n_samples = target_ds.sizes["sample"]
+    members = np.sort(np.unique(target_ds.number.values))
+    members_mask = members[:25]
 
-    # Check that target and drivers have same number of samples
-    for var in driver_vars:
-        if driver_ds.sizes["sample"] != n_samples:
-            raise ValueError(
-                f"Target and driver sample sizes differ: "
-                f"target={n_samples}, {var}={driver_ds.sizes['sample']}"
-            )
+    target_ds = target_ds.where(
+        target_ds.number.isin(members_mask),
+        drop=True
+    )
 
-    #include driver_vars selection as in bachelor thesis
+    driver_ds = driver_ds.where(
+        driver_ds.number.isin(members_mask),
+        drop=True
+    )
+
+    # ------------------------------------------------------------
+    # 2. Years
+    # ------------------------------------------------------------
+
+    years_per_obs = target_ds.forecast_reference_time.dt.year.values
+    years = np.unique(years_per_obs)
+
+    if sample_size is None:
+        sample_size = len(years)
+
+    # ------------------------------------------------------------
+    # 3. Convert everything to NumPy ONCE
+    # ------------------------------------------------------------
+
+    y_all = target_ds[target_var].values
+
     controls_dict = modify_driver_list(
         driver_vars,
         total_eff=total_eff
     )
 
-    #rerun yields the same result
+    # ------------------------------------------------------------
+    # 4. Generate bootstrap year indices ONCE
+    # ------------------------------------------------------------
+
     rng = np.random.default_rng(seed)
 
-    #get bootstrap indices before opening loop to ensure each driver regression has same samples
-    bootstrap_indices = [
-        rng.choice(
-            n_samples,
-            size=sample_size,
-            replace=True
-        )
-        for _ in range(n_boot)
-    ]
+    bootstrap_years = rng.choice(
+        years,
+        size=(n_boot, sample_size),
+        replace=True
+    )
 
-        
-    #initalize counter on how many bootstraps have enough values
-    counter=0
+    # Precompute indices belonging to each year
+    year_indices = {
+        year: np.flatnonzero(years_per_obs == year)
+        for year in years
+    }
+
+    print(year_indices.keys())
+
+    # ------------------------------------------------------------
+    # 5. Results
+    # ------------------------------------------------------------
+
+    results = []
+
+    # ------------------------------------------------------------
+    # 6. Loop over drivers
+    # ------------------------------------------------------------
+
     for driver in driver_vars:
+
         controls = controls_dict[driver]
 
-        #special case handling: ENSO total effect needs no controls
         if controls is None:
-            regression_vars=[driver]
+            regression_vars = [driver]
         else:
             regression_vars = [driver] + controls
-        if ~printer:
-            print(driver, regression_vars)
-            
-        for i, idx in enumerate(bootstrap_indices):
-    
 
-            y = target_ds[target_var].isel(sample=idx).values
-
-            X = pd.DataFrame({
-            var: driver_ds[var].isel(sample=idx).values
+        # Get driver data ONCE
+        X_all = np.column_stack([
+            driver_ds[var].values
             for var in regression_vars
-            })
+        ])
 
-            df = X.copy()
-            df["target"] = y
-            df = df.dropna()
+        # --------------------------------------------------------
+        # Bootstrap
+        # --------------------------------------------------------
 
-            # Number of valid observations
-            n_valid = len(df)
+        for b in range(n_boot):
 
-            # Not enough data to fit regression
-            if n_valid == 0:
-                print(f"Bootstrap {i}: 0 valid samples -- skipping")
-                continue
+            # Build indices directly with NumPy
+            idx = np.concatenate([
+                year_indices[year]
+                for year in bootstrap_years[b]
+            ])
 
-            # Need at least more observations than parameters
-            n_predictors = len(regression_vars)
+            X = X_all[idx]
+            y = y_all[idx]
+
+            # Remove NaNs
+            valid = (
+                np.isfinite(y)
+                & np.all(np.isfinite(X), axis=1)
+            )
+
+            X = X[valid]
+            y = y[valid]
+
+            n_valid = len(y)
+
+            n_predictors = X.shape[1]
             n_parameters = n_predictors + int(add_intercept)
 
             if n_valid <= n_parameters:
-                if printer:
-                    print(
-                    f"Bootstrap {i}: only {n_valid} valid samples "
-                    f"for {n_parameters} parameters -- skipping"
-                    )
-                else:
-                    counter+=1
                 continue
 
-            X_clean = df[regression_vars]
-            y_clean = df["target"]
-
+            # Add intercept
             if add_intercept:
-                X_clean = sm.add_constant(X_clean)
-
-        
-            
-            if quantiles is None:
-                model = sm.OLS(y_clean, X_clean).fit()
-
-                row = {
-                                    "bootstrap": i,
-                                    "target": target_var,
-                                    "drivers": "+".join(regression_vars),
-                                    "r2": model.rsquared
-                                }
-                for name, value in model.params.items():
-                            if name==driver:
-                                row[f"coef_{name}"] = value
-
+                Xreg = np.column_stack([
+                    np.ones(n_valid),
+                    X
+                ])
+                focal_idx = 1
             else:
-                #quantiles = [0.05, 0.5, 0.95]
-                
-                for quantile in quantiles:
-                    qr = QuantileRegressor(quantile=quantile, fit_intercept=add_intercept, alpha=0)
-                    model = qr.fit(X_clean, y_clean)
+                Xreg = X
+                focal_idx = 0
 
-                    row = {
-                                        "bootstrap": i,
-                                        "target": target_var,
-                                        "drivers": "+".join(regression_vars),
-                                        f"r2_{quantile}": model.score
-                                    }
-                    
-                    # Pairs column names directly with their respective slope
-                    for col_name, coef_val in zip(X.columns, model.coef_):
-                        row[f'coef_{col_name}_{quantile}'] = coef_val
-                        
-                    if add_intercept:
-                        row[f'intercept_{quantile}'] = model.intercept_
+            # ----------------------------------------------------
+            # Least squares
+            # ----------------------------------------------------
 
-    
-        
+            beta, residuals, rank, s = np.linalg.lstsq(
+                Xreg,
+                y,
+                rcond=None
+            )
 
-            results.append(row)
+            if rank < Xreg.shape[1]:
+                continue
 
-    if ~printer:
-        print('Valid bootstraps: '+ str(n_boot-counter)+'/'+str(n_boot))
+            # R²
+            y_hat = Xreg @ beta
+
+            ss_res = np.sum((y - y_hat) ** 2)
+            ss_tot = np.sum((y - np.mean(y)) ** 2)
+
+            r2 = (
+                1.0 - ss_res / ss_tot
+                if ss_tot > 0
+                else np.nan
+            )
+
+            results.append({
+                "bootstrap": b,
+                "target": target_var,
+                "drivers": "+".join(regression_vars),
+                f"coef_{driver}": beta[focal_idx],
+                "r2": r2,
+            })
+
     return pd.DataFrame(results)
 
 from Functions_bootstrap import modify_driver_list
@@ -851,14 +874,14 @@ era5_precip_LP_direct={'ENSO':0.53, 'IOD':-0.15, 'SPV':-0.10, 'S_SAM':-0.15, 'A_
 era5_val_direct_list=[era5_temp_Andes_direct, era5_precip_Andes_direct, era5_temp_LP_direct, era5_precip_LP_direct]
 heading_list=['Andes T','Andes Pr','La Plata T','La Plata Pr']
 #direct effects on T and precip in both regions
-results_direct_T_Andes_SON_1000=bootstrap_regression(target_Andes_SON_xr, drivers_SON_xr, 't2m', drivers_SON, n_boot=10000, sample_size=200, add_intercept=False)
-results_direct_Pr_Andes_SON_1000=bootstrap_regression(target_Andes_SON_xr, drivers_SON_xr, 'tp', drivers_SON, n_boot=10000, sample_size=200, add_intercept=False)
-results_direct_T_LP_SON_1000=bootstrap_regression(target_LP_SON_xr, drivers_SON_xr, 't2m', drivers_SON, n_boot=10000, sample_size=200, add_intercept=False)
-results_direct_Pr_LP_SON_1000=bootstrap_regression(target_LP_SON_xr, drivers_SON_xr, 'tp', drivers_SON, n_boot=10000, sample_size=200, add_intercept=False)
+results_direct_T_Andes_SON_1000=bootstrap_regression_yearwise(target_Andes_SON_xr, drivers_SON_xr, 't2m', drivers_SON, n_boot=10000, sample_size=8, add_intercept=False)
+results_direct_Pr_Andes_SON_1000=bootstrap_regression_yearwise(target_Andes_SON_xr, drivers_SON_xr, 'tp', drivers_SON, n_boot=10000, sample_size=8, add_intercept=False)
+results_direct_T_LP_SON_1000=bootstrap_regression_yearwise(target_LP_SON_xr, drivers_SON_xr, 't2m', drivers_SON, n_boot=10000, sample_size=8, add_intercept=False)
+results_direct_Pr_LP_SON_1000=bootstrap_regression_yearwise(target_LP_SON_xr, drivers_SON_xr, 'tp', drivers_SON, n_boot=10000, sample_size=8, add_intercept=False)
 
 for i, element in enumerate([results_direct_T_Andes_SON_1000, results_direct_Pr_Andes_SON_1000, results_direct_T_LP_SON_1000, results_direct_Pr_LP_SON_1000]):
     plot_bootstrap_coefficients(element, drivers_SON,
-                                title=f'Bootstrap regression coefficients \n {heading_list[i]}', 
+                                title=f'Bootstrap regression coefficients yearwise \n {heading_list[i]}', 
                                 era5_vals=era5_val_direct_list[i])
     
 #total effects on T and precip in both regions
@@ -870,37 +893,37 @@ era5_precip_LP_total={'ENSO':0.65, 'IOD':-0.08, 'SPV':0.00}
 era5_val_total_list=[era5_temp_Andes_total, era5_precip_Andes_total, 
                      era5_temp_LP_total, era5_precip_LP_total]
 
-results_tot_T_Andes_SON_1000=bootstrap_regression(target_Andes_SON_xr, drivers_SON_xr, 't2m', drivers_SON_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-results_tot_Pr_Andes_SON_1000=bootstrap_regression(target_Andes_SON_xr, drivers_SON_xr, 'tp', drivers_SON_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-results_tot_T_LP_SON_1000=bootstrap_regression(target_LP_SON_xr, drivers_SON_xr, 't2m', drivers_SON_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-results_tot_Pr_LP_SON_1000=bootstrap_regression(target_LP_SON_xr, drivers_SON_xr, 'tp', drivers_SON_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
+results_tot_T_Andes_SON_1000=bootstrap_regression_yearwise(target_Andes_SON_xr, drivers_SON_xr, 't2m', drivers_SON_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+results_tot_Pr_Andes_SON_1000=bootstrap_regression_yearwise(target_Andes_SON_xr, drivers_SON_xr, 'tp', drivers_SON_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+results_tot_T_LP_SON_1000=bootstrap_regression_yearwise(target_LP_SON_xr, drivers_SON_xr, 't2m', drivers_SON_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+results_tot_Pr_LP_SON_1000=bootstrap_regression_yearwise(target_LP_SON_xr, drivers_SON_xr, 'tp', drivers_SON_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
 
 for i, element in enumerate([results_tot_T_Andes_SON_1000, results_tot_Pr_Andes_SON_1000, results_tot_T_LP_SON_1000, results_tot_Pr_LP_SON_1000]):
     plot_bootstrap_coefficients(element, drivers_SON_tot, 
-                                title=f'Bootstrap regression coefficients \n Total effects '+ f' {heading_list[i]}',
+                                title=f'Bootstrap regression coefficients yearwise \n Total effects '+ f' {heading_list[i]}',
                                 era5_vals=era5_val_total_list[i])
 
 #other SON links
-results_IOD_1000=bootstrap_regression(drivers_SON_xr, drivers_SON_xr, 'IOD', ['ENSO'], n_boot=10000, sample_size=200, 
+results_IOD_1000=bootstrap_regression_yearwise(drivers_SON_xr, drivers_SON_xr, 'IOD', ['ENSO'], n_boot=10000, sample_size=8, 
                                       add_intercept=False
                                       )
-results_SPV_1000=bootstrap_regression(drivers_SON_xr, drivers_SON_xr, 'SPV', ['ENSO', 'IOD'], n_boot=10000, sample_size=200, 
+results_SPV_1000=bootstrap_regression_yearwise(drivers_SON_xr, drivers_SON_xr, 'SPV', ['ENSO', 'IOD'], n_boot=10000, sample_size=8, 
                                       add_intercept=False
                                       )
-results_A_SAM_1000=bootstrap_regression(drivers_SON_xr, drivers_SON_xr, 'A_SAM', ['ENSO', 'IOD'], n_boot=10000, sample_size=200, 
+results_A_SAM_1000=bootstrap_regression_yearwise(drivers_SON_xr, drivers_SON_xr, 'A_SAM', ['ENSO', 'IOD'], n_boot=10000, sample_size=8, 
                                       add_intercept=False
                                       )
-results_S_SAM_1000=bootstrap_regression(drivers_SON_xr, drivers_SON_xr, 'S_SAM', ['ENSO','IOD', 'SPV'], n_boot=10000, sample_size=200, 
+results_S_SAM_1000=bootstrap_regression_yearwise(drivers_SON_xr, drivers_SON_xr, 'S_SAM', ['ENSO','IOD', 'SPV'], n_boot=10000, sample_size=8, 
                                       add_intercept=False
                                       )
 
-plot_bootstrap_coefficients(results_IOD_1000, ['ENSO'], title='Bootstrap regression coefficients \n IOD',
+plot_bootstrap_coefficients(results_IOD_1000, ['ENSO'], title='Bootstrap regression coefficients yearwise \n IOD',
                             era5_vals={'ENSO':0.55})
-plot_bootstrap_coefficients(results_SPV_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients \n SPV',
+plot_bootstrap_coefficients(results_SPV_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients yearwise \n SPV',
                             era5_vals={'ENSO':-0.08, 'IOD':0.05})
-plot_bootstrap_coefficients(results_A_SAM_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients \n A_SAM',
+plot_bootstrap_coefficients(results_A_SAM_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients yearwise \n A_SAM',
                             era5_vals={'ENSO':-0.57, 'IOD':-0.25})
-plot_bootstrap_coefficients(results_S_SAM_1000, ['ENSO', 'IOD', 'SPV'], title='Bootstrap regression coefficients \n S_SAM',
+plot_bootstrap_coefficients(results_S_SAM_1000, ['ENSO', 'IOD', 'SPV'], title='Bootstrap regression coefficients yearwise \n S_SAM',
                             era5_vals={'ENSO':-0.05, 'IOD':-0.08, 'SPV':0.72})
 
 
@@ -919,15 +942,15 @@ era5_val_direct_list=[era5_temp_Andes_direct_DJF, era5_precip_Andes_direct_DJF,
                        era5_temp_LP_direct_DJF, era5_precip_LP_direct_DJF]
 heading_list=['Andes T','Andes Pr','La Plata T','La Plata Pr']
 #direct effects on T and precip in both regions
-results_direct_T_Andes_DJF_1000=bootstrap_regression(target_Andes_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF, n_boot=10000, sample_size=200, add_intercept=False)
-results_direct_Pr_Andes_DJF_1000=bootstrap_regression(target_Andes_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF, n_boot=10000, sample_size=200, add_intercept=False)
-results_direct_T_LP_DJF_1000=bootstrap_regression(target_LP_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF, n_boot=10000, sample_size=200, add_intercept=False)
-results_direct_Pr_LP_DJF_1000=bootstrap_regression(target_LP_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF, n_boot=10000, sample_size=200, add_intercept=False)
+results_direct_T_Andes_DJF_1000=bootstrap_regression_yearwise(target_Andes_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF, n_boot=10000, sample_size=8, add_intercept=False)
+results_direct_Pr_Andes_DJF_1000=bootstrap_regression_yearwise(target_Andes_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF, n_boot=10000, sample_size=8, add_intercept=False)
+results_direct_T_LP_DJF_1000=bootstrap_regression_yearwise(target_LP_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF, n_boot=10000, sample_size=8, add_intercept=False)
+results_direct_Pr_LP_DJF_1000=bootstrap_regression_yearwise(target_LP_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF, n_boot=10000, sample_size=8, add_intercept=False)
 
 for i, element in enumerate([results_direct_T_Andes_DJF_1000, results_direct_Pr_Andes_DJF_1000, 
                              results_direct_T_LP_DJF_1000, results_direct_Pr_LP_DJF_1000]):
     plot_bootstrap_coefficients(element, drivers_DJF,
-                                title=f'Bootstrap regression coefficients \n {heading_list[i]}', 
+                                title=f'Bootstrap regression coefficients yearwise \n {heading_list[i]}', 
                                 era5_vals=era5_val_direct_list[i])
 
 #total effects on T and precip in both regions
@@ -939,15 +962,15 @@ era5_precip_LP_total_DJF={'ENSO':0.46, 'IOBW':-0.33, 'VB':-0.14}
 era5_val_total_list=[era5_temp_Andes_total_DJF, era5_precip_Andes_total_DJF,
                      era5_temp_LP_total_DJF, era5_precip_LP_total_DJF]
 
-results_tot_T_Andes_DJF_1000=bootstrap_regression(target_Andes_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-results_tot_Pr_Andes_DJF_1000=bootstrap_regression(target_Andes_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-results_tot_T_LP_DJF_1000=bootstrap_regression(target_LP_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-results_tot_Pr_LP_DJF_1000=bootstrap_regression(target_LP_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF_tot, n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
+results_tot_T_Andes_DJF_1000=bootstrap_regression_yearwise(target_Andes_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+results_tot_Pr_Andes_DJF_1000=bootstrap_regression_yearwise(target_Andes_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+results_tot_T_LP_DJF_1000=bootstrap_regression_yearwise(target_LP_DJF_xr, drivers_DJF_xr, 't2m', drivers_DJF_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+results_tot_Pr_LP_DJF_1000=bootstrap_regression_yearwise(target_LP_DJF_xr, drivers_DJF_xr, 'tp', drivers_DJF_tot, n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
 
 for i, element in enumerate([results_tot_T_Andes_DJF_1000, results_tot_Pr_Andes_DJF_1000,
                              results_tot_T_LP_DJF_1000, results_tot_Pr_LP_DJF_1000]):
     plot_bootstrap_coefficients(element, drivers_DJF_tot, 
-                                title=f'Bootstrap regression coefficients \n Total effects '+ f' {heading_list[i]}',
+                                title=f'Bootstrap regression coefficients yearwise \n Total effects '+ f' {heading_list[i]}',
                                 era5_vals=era5_val_total_list[i])
 
 
@@ -955,37 +978,37 @@ for i, element in enumerate([results_tot_T_Andes_DJF_1000, results_tot_Pr_Andes_
 
 #IOBW
 era5_IOBW={'ENSO':0.81}
-IOBW_DJF_1000=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'IOBW', ['ENSO'], n_boot=10000,
-                                    sample_size=200, add_intercept=False)
+IOBW_DJF_1000=bootstrap_regression_yearwise(drivers_DJF_xr, drivers_DJF_xr, 'IOBW', ['ENSO'], n_boot=10000,
+                                    sample_size=8, add_intercept=False)
 plot_bootstrap_coefficients(IOBW_DJF_1000, ['ENSO'], title='Bootstrap reg coef for IOBW DJF \n Init month: 9 + 10',
                             era5_vals=era5_IOBW)
 
-IOBW_DJF_10000=bootstrap_regression(drivers_DJF_xr_no_VB, drivers_DJF_xr_no_VB, 'IOBW', ['ENSO'], n_boot=10000,
-                                    sample_size=200, add_intercept=False)
+IOBW_DJF_10000=bootstrap_regression_yearwise(drivers_DJF_xr_no_VB, drivers_DJF_xr_no_VB, 'IOBW', ['ENSO'], n_boot=10000,
+                                    sample_size=8, add_intercept=False)
 plot_bootstrap_coefficients(IOBW_DJF_10000, ['ENSO'], title='Bootstrap reg coef for IOBW DJF (no VB) \n All inits',
                             era5_vals=era5_IOBW) 
 #A_SAM
 era5_A_SAM_DJF={'ENSO':-0.44, 'IOBW':0.04}
 
-A_SAM_DJF_init9=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000,
-                                    sample_size=200, add_intercept=False)
+A_SAM_DJF_init9=bootstrap_regression_yearwise(drivers_DJF_xr, drivers_DJF_xr, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000,
+                                    sample_size=8, add_intercept=False)
 plot_bootstrap_coefficients(A_SAM_DJF_init9, ['ENSO', 'IOBW'], title='Bootstrap reg coef for A-SAM DJF \n Init month: 9 +10',
                             era5_vals=era5_A_SAM_DJF)
 
-A_SAM_DJF_10000=bootstrap_regression(drivers_DJF_xr_no_VB, drivers_DJF_xr_no_VB, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000,
-                                    sample_size=200, add_intercept=False)
+A_SAM_DJF_10000=bootstrap_regression_yearwise(drivers_DJF_xr_no_VB, drivers_DJF_xr_no_VB, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000,
+                                    sample_size=8, add_intercept=False)
 plot_bootstrap_coefficients(A_SAM_DJF_10000, ['ENSO', 'IOBW'], title='Bootstrap reg coef for A-SAM DJF (no VB) \n All inits',
                             era5_vals=era5_A_SAM_DJF)
 #VB
 era5_VB_DJF={'ENSO':-0.23,'IOBW':0.26}
-VB_DJF_init9=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'VB', ['ENSO', 'IOBW'], n_boot=10000,
-                                    sample_size=200, add_intercept=False)
+VB_DJF_init9=bootstrap_regression_yearwise(drivers_DJF_xr, drivers_DJF_xr, 'VB', ['ENSO', 'IOBW'], n_boot=10000,
+                                    sample_size=8, add_intercept=False)
 plot_bootstrap_coefficients(VB_DJF_init9, ['ENSO', 'IOBW'], title='Bootstrap reg coef for VB DJF \n Init month: 9 +10', era5_vals=era5_VB_DJF)
 
 #S_SAM
 era5_S_SAM_DJF={'ENSO':-0.18, 'IOBW':0.1, 'VB':0.44}
-S_SAM_DJF_init9=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'S_SAM', ['ENSO', 'IOBW', 'VB'], n_boot=10000,
-                                    sample_size=200, add_intercept=False)
+S_SAM_DJF_init9=bootstrap_regression_yearwise(drivers_DJF_xr, drivers_DJF_xr, 'S_SAM', ['ENSO', 'IOBW', 'VB'], n_boot=10000,
+                                    sample_size=8, add_intercept=False)
 plot_bootstrap_coefficients(S_SAM_DJF_init9, ['ENSO', 'IOBW', 'VB'], title='Bootstrap reg coef for S-SAM DJF \n Init month: 9 +10', era5_vals=era5_S_SAM_DJF)
 
 print('Finished DJF mixing all!')
@@ -1008,8 +1031,6 @@ summer_driver_links=[IOBW_DJF_1000['coef_ENSO'].mean(),
                       *[S_SAM_DJF_init9[f'coef_{var}'].mean() for var in ['ENSO', 'IOBW', 'VB']]]
 print(spring_driver_links)
 
-
-#Function for data prepping for Overview figure
 def transform_reg_lists(
     somelist,
     driver_target_tuple_list,
@@ -1132,7 +1153,6 @@ for i, var in enumerate(target_vars):
          positions_list.append(pos_precip_DJF)
 
 
-
 network_data_list=list(d_SON.values())+list(d_DJF.values())
 title_list = []
 
@@ -1146,14 +1166,14 @@ for var in target_vars:
     title_list.append(f"{var.split('_')[0]} {region}")   # DJF
 
     
-positions_list=[pos_t_SON, pos_precip_SON, pos_t_SON, pos_precip_SON,
-                 pos_t_DJF, pos_precip_DJF, pos_t_DJF, pos_precip_DJF]
+#positions_list=[pos_t_SON, pos_precip_SON, pos_t_SON, pos_precip_SON,
+#                 pos_t_DJF, pos_precip_DJF, pos_t_DJF, pos_precip_DJF]
 
 
 print(network_data_list)
 
 plot_causal_networks_grid(network_data_list, positions_list, title_list, row_labels=['SON', 'DJF'], 
-                          heading_add='Hindcast mean coefficients')
+                          heading_add='Hindcast mean yearwise coefficients')
 
 print('Finished overview figure!')
 
@@ -1171,93 +1191,94 @@ for init_month in np.unique(target_Andes_SON_xr.init_month.values):
     # Perform regression analysis for this specific init month
 
     #direct effects
-    results_direct_T_Andes_SON_init = bootstrap_regression(target_Andes_SON_xr_init, drivers_SON_xr_init, 't2m', 
-                                                           drivers_SON, n_boot=10000, sample_size=200, add_intercept=False)
-    results_direct_Pr_Andes_SON_init = bootstrap_regression(target_Andes_SON_xr_init, 
+    results_direct_T_Andes_SON_init = bootstrap_regression_yearwise(target_Andes_SON_xr_init, drivers_SON_xr_init, 't2m', 
+                                                           drivers_SON, n_boot=10000, sample_size=8, add_intercept=False)
+    results_direct_Pr_Andes_SON_init = bootstrap_regression_yearwise(target_Andes_SON_xr_init, 
                                                             drivers_SON_xr_init, 'tp', drivers_SON, 
-                                                            n_boot=10000, sample_size=200, add_intercept=False)
-    results_direct_T_LP_SON_init = bootstrap_regression(target_LP_SON_xr_init, drivers_SON_xr_init, 't2m', 
-                                                        drivers_SON, n_boot=10000, sample_size=200, add_intercept=False)
-    results_direct_Pr_LP_SON_init = bootstrap_regression(target_LP_SON_xr_init, drivers_SON_xr_init, 'tp', 
-                                                         drivers_SON, n_boot=10000, sample_size=200, add_intercept=False)
+                                                            n_boot=10000, sample_size=8, add_intercept=False)
+    results_direct_T_LP_SON_init = bootstrap_regression_yearwise(target_LP_SON_xr_init, drivers_SON_xr_init, 't2m', 
+                                                        drivers_SON, n_boot=10000, sample_size=8, add_intercept=False)
+    results_direct_Pr_LP_SON_init = bootstrap_regression_yearwise(target_LP_SON_xr_init, drivers_SON_xr_init, 'tp', 
+                                                         drivers_SON, n_boot=10000, sample_size=8, add_intercept=False)
 
     # Plotting the results for this specific init month
     plot_bootstrap_coefficients(results_direct_T_Andes_SON_init, drivers_SON,
-                                title=f'Bootstrap regression coefficients \n Andes T SON for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Andes T SON for Init Month {init_month}')
     plot_bootstrap_coefficients(results_direct_Pr_Andes_SON_init, drivers_SON,
-                                title=f'Bootstrap regression coefficients \n Andes Pr SON for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Andes Pr SON for Init Month {init_month}')
     plot_bootstrap_coefficients(results_direct_T_LP_SON_init, drivers_SON,
-                                title=f'Bootstrap regression coefficients \n La Plata T SON for Init Month {init_month}')   
+                                title=f'Bootstrap regression coefficients yearwise \n La Plata T SON for Init Month {init_month}')   
     plot_bootstrap_coefficients(results_direct_Pr_LP_SON_init, drivers_SON,
-                                title=f'Bootstrap regression coefficients \n La Plata Pr SON for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n La Plata Pr SON for Init Month {init_month}')
 
     #total effects
-    results_tot_T_Andes_SON_init = bootstrap_regression(target_Andes_SON_xr_init, drivers_SON_xr_init, 't2m', drivers_SON_tot, 
-                                                        n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-    results_tot_Pr_Andes_SON_init = bootstrap_regression(target_Andes_SON_xr_init, drivers_SON_xr_init, 'tp', drivers_SON_tot, 
-                                                         n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-    results_tot_T_LP_SON_init = bootstrap_regression(target_LP_SON_xr_init, drivers_SON_xr_init, 't2m', drivers_SON_tot,
-                                                     n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-    results_tot_Pr_LP_SON_init = bootstrap_regression(target_LP_SON_xr_init, drivers_SON_xr_init, 'tp', drivers_SON_tot, 
-                                                      n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
+    results_tot_T_Andes_SON_init = bootstrap_regression_yearwise(target_Andes_SON_xr_init, drivers_SON_xr_init, 't2m', drivers_SON_tot, 
+                                                        n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+    results_tot_Pr_Andes_SON_init = bootstrap_regression_yearwise(target_Andes_SON_xr_init, drivers_SON_xr_init, 'tp', drivers_SON_tot, 
+                                                         n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+    results_tot_T_LP_SON_init = bootstrap_regression_yearwise(target_LP_SON_xr_init, drivers_SON_xr_init, 't2m', drivers_SON_tot,
+                                                     n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+    results_tot_Pr_LP_SON_init = bootstrap_regression_yearwise(target_LP_SON_xr_init, drivers_SON_xr_init, 'tp', drivers_SON_tot, 
+                                                      n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
     
     # Plotting the total effects results for this specific init month
     plot_bootstrap_coefficients(results_tot_T_Andes_SON_init, drivers_SON_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects Andes T SON for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects Andes T SON for Init Month {init_month}')
     plot_bootstrap_coefficients(results_tot_Pr_Andes_SON_init, drivers_SON_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects Andes Pr SON for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects Andes Pr SON for Init Month {init_month}')
     plot_bootstrap_coefficients(results_tot_T_LP_SON_init, drivers_SON_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects La Plata T SON for Init Month {init_month}')   
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects La Plata T SON for Init Month {init_month}')   
     plot_bootstrap_coefficients(results_tot_Pr_LP_SON_init, drivers_SON_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects La Plata Pr SON for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects La Plata Pr SON for Init Month {init_month}')
 
 
     #other links for this specific init month
-    results_IOD_init = bootstrap_regression(drivers_SON_xr_init, drivers_SON_xr_init, 'IOD', ['ENSO'], n_boot=10000, sample_size=200, add_intercept=False)
-    results_SPV_init = bootstrap_regression(drivers_SON_xr_init, drivers_SON_xr_init, 'SPV', ['ENSO', 'IOD'], n_boot=10000, sample_size=200, add_intercept=False)
-    results_A_SAM_init = bootstrap_regression(drivers_SON_xr_init, drivers_SON_xr_init, 'A_SAM', ['ENSO', 'IOD'], n_boot=10000, sample_size=200, add_intercept=False)
-    results_S_SAM_init = bootstrap_regression(drivers_SON_xr_init, drivers_SON_xr_init, 'S_SAM', ['ENSO','IOD', 'SPV'], n_boot=10000, sample_size=200, add_intercept=False)
+    results_IOD_init = bootstrap_regression_yearwise(drivers_SON_xr_init, drivers_SON_xr_init, 'IOD', ['ENSO'], n_boot=10000, sample_size=8, add_intercept=False)
+    results_SPV_init = bootstrap_regression_yearwise(drivers_SON_xr_init, drivers_SON_xr_init, 'SPV', ['ENSO', 'IOD'], n_boot=10000, sample_size=8, add_intercept=False)
+    results_A_SAM_init = bootstrap_regression_yearwise(drivers_SON_xr_init, drivers_SON_xr_init, 'A_SAM', ['ENSO', 'IOD'], n_boot=10000, sample_size=8, add_intercept=False)
+    results_S_SAM_init = bootstrap_regression_yearwise(drivers_SON_xr_init, drivers_SON_xr_init, 'S_SAM', ['ENSO','IOD', 'SPV'], n_boot=10000, sample_size=8, add_intercept=False)
 
-    plot_bootstrap_coefficients(results_IOD_init, ['ENSO'], title=f'Bootstrap regression coefficients \n IOD SON for Init Month {init_month}')
-    plot_bootstrap_coefficients(results_SPV_init, ['ENSO', 'IOD'], title=f'Bootstrap regression coefficients \n SPV SON for Init Month {init_month}')
-    plot_bootstrap_coefficients(results_A_SAM_init, ['ENSO', 'IOD'], title=f'Bootstrap regression coefficients \n A_SAM SON for Init Month {init_month}')
-    plot_bootstrap_coefficients(results_S_SAM_init, ['ENSO', 'IOD', 'SPV'], title=f'Bootstrap regression coefficients \n S_SAM SON for Init Month {init_month}')
-
+    plot_bootstrap_coefficients(results_IOD_init, ['ENSO'], title=f'Bootstrap regression coefficients yearwise \n IOD SON for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_SPV_init, ['ENSO', 'IOD'], title=f'Bootstrap regression coefficients yearwise \n SPV SON for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_A_SAM_init, ['ENSO', 'IOD'], title=f'Bootstrap regression coefficients yearwise \n A_SAM SON for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_S_SAM_init, ['ENSO', 'IOD', 'SPV'], title=f'Bootstrap regression coefficients yearwise \n S_SAM SON for Init Month {init_month}')
 
     #overview figure spring
     spring_driver_links_init=[results_IOD_init['coef_ENSO'].mean(), *[
-                    results_SPV_init[f'coef_{var}'].mean()
-                    for var in ['ENSO', 'IOD']
-                ], *[
-                    results_A_SAM_init[f'coef_{var}'].mean()
-                    for var in ['ENSO', 'IOD']
-                ], *[
-                    results_S_SAM_init[f'coef_{var}'].mean()
-                    for var in ['ENSO', 'IOD', 'SPV']
-                ]] 
-    
+                results_SPV_init[f'coef_{var}'].mean()
+                for var in ['ENSO', 'IOD']
+            ], *[
+                results_A_SAM_init[f'coef_{var}'].mean()
+                for var in ['ENSO', 'IOD']
+            ], *[
+                results_S_SAM_init[f'coef_{var}'].mean()
+                for var in ['ENSO', 'IOD', 'SPV']
+            ]] 
+
     mod_dict_SON_init = transform_reg_lists(
-                    spring_driver_links_init,
-                    driver_target_list_SON,
-                    mod_dict_SON, copy_ind=False)
-    
+                spring_driver_links_init,
+                driver_target_list_SON,
+                mod_dict_SON, copy_ind=False
+            )
+
     target_reg_coef_list_SON_init=[mean_from_df(results_direct_T_Andes_SON_init), 
-                                        mean_from_df(results_direct_Pr_Andes_SON_init),
-                                          mean_from_df(results_direct_T_LP_SON_init), 
-                                          mean_from_df(results_direct_Pr_LP_SON_init)]
+                                    mean_from_df(results_direct_Pr_Andes_SON_init),
+                                      mean_from_df(results_direct_T_LP_SON_init), 
+                                      mean_from_df(results_direct_Pr_LP_SON_init)]
+
     d_SON_init={}
-        
-    for i in range(len(target_vars)):
-                target_tuple_list=[(driver, target_vars[i]) for driver in drivers_SON]
-                
-                SON_target_dict_init=transform_reg_lists(target_reg_coef_list_SON_init[i], target_tuple_list, mod_dict_SON_init)
-                
-                d_SON_init[target_vars[i]]=SON_target_dict_init
-                 
     
+    for i in range(len(target_vars)):
+            target_tuple_list=[(driver, target_vars[i]) for driver in drivers_SON]
+            
+            SON_target_dict_init=transform_reg_lists(target_reg_coef_list_SON_init[i], target_tuple_list, mod_dict_SON_init)
+            
+            d_SON_init[target_vars[i]]=SON_target_dict_init
+             
+
     network_data_list_init_SON=list(d_SON_init.values())
-    plot_causal_networks_grid_flexible(network_data_list_init_SON, positions_list[:4], title_list, 
-                                           row_labels=['SON'], heading_add=f'Hindcast mean SON coefficients for Init Month {init_month}')
+    plot_causal_networks_grid_flexible(network_data_list_init_SON, positions_list[:4], title_list, row_labels=['SON'], heading_add=f'Hindcast mean yearwise SON coefficients for Init Month {init_month}')
+    
 print('Finished SON stratified by init month!')
 
 for init_month in np.unique(target_Andes_DJF_xr.init_month.values):
@@ -1273,95 +1294,93 @@ for init_month in np.unique(target_Andes_DJF_xr.init_month.values):
     # Perform regression analysis for this specific init month
 
     #direct effects
-    results_direct_T_Andes_DJF_init = bootstrap_regression(target_Andes_DJF_xr_init, drivers_DJF_xr_init, 't2m', 
-                                                           drivers_DJF, n_boot=10000, sample_size=200, add_intercept=False)
-    results_direct_Pr_Andes_DJF_init = bootstrap_regression(target_Andes_DJF_xr_init, 
+    results_direct_T_Andes_DJF_init = bootstrap_regression_yearwise(target_Andes_DJF_xr_init, drivers_DJF_xr_init, 't2m', 
+                                                           drivers_DJF, n_boot=10000, sample_size=8, add_intercept=False)
+    results_direct_Pr_Andes_DJF_init = bootstrap_regression_yearwise(target_Andes_DJF_xr_init, 
                                                             drivers_DJF_xr_init, 'tp', drivers_DJF, 
-                                                            n_boot=10000, sample_size=200, add_intercept=False)
-    results_direct_T_LP_DJF_init = bootstrap_regression(target_LP_DJF_xr_init, drivers_DJF_xr_init, 't2m', 
-                                                        drivers_DJF, n_boot=10000, sample_size=200, add_intercept=False)
-    results_direct_Pr_LP_DJF_init = bootstrap_regression(target_LP_DJF_xr_init, drivers_DJF_xr_init, 'tp', 
-                                                         drivers_DJF, n_boot=10000, sample_size=200, add_intercept=False)
+                                                            n_boot=10000, sample_size=8, add_intercept=False)
+    results_direct_T_LP_DJF_init = bootstrap_regression_yearwise(target_LP_DJF_xr_init, drivers_DJF_xr_init, 't2m', 
+                                                        drivers_DJF, n_boot=10000, sample_size=8, add_intercept=False)
+    results_direct_Pr_LP_DJF_init = bootstrap_regression_yearwise(target_LP_DJF_xr_init, drivers_DJF_xr_init, 'tp', 
+                                                         drivers_DJF, n_boot=10000, sample_size=8, add_intercept=False)
 
     # Plotting the results for this specific init month
     plot_bootstrap_coefficients(results_direct_T_Andes_DJF_init, drivers_DJF,
-                                title=f'Bootstrap regression coefficients \n Andes T DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Andes T DJF for Init Month {init_month}')
     plot_bootstrap_coefficients(results_direct_Pr_Andes_DJF_init, drivers_DJF,
-                                title=f'Bootstrap regression coefficients \n Andes Pr DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Andes Pr DJF for Init Month {init_month}')
     plot_bootstrap_coefficients(results_direct_T_LP_DJF_init, drivers_DJF,
-                                title=f'Bootstrap regression coefficients \n La Plata T DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n La Plata T DJF for Init Month {init_month}')
     plot_bootstrap_coefficients(results_direct_Pr_LP_DJF_init, drivers_DJF,
-                                title=f'Bootstrap regression coefficients \n La Plata Pr DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n La Plata Pr DJF for Init Month {init_month}')
 
     #total effects
-    results_tot_T_Andes_DJF_init = bootstrap_regression(target_Andes_DJF_xr_init, drivers_DJF_xr_init, 't2m', drivers_DJF_tot, 
-                                                        n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-    results_tot_Pr_Andes_DJF_init = bootstrap_regression(target_Andes_DJF_xr_init, drivers_DJF_xr_init, 'tp', drivers_DJF_tot, 
-                                                         n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-    results_tot_T_LP_DJF_init = bootstrap_regression(target_LP_DJF_xr_init, drivers_DJF_xr_init, 't2m', drivers_DJF_tot,
-                                                     n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
-    results_tot_Pr_LP_DJF_init = bootstrap_regression(target_LP_DJF_xr_init, drivers_DJF_xr_init, 'tp', drivers_DJF_tot, 
-                                                      n_boot=10000, sample_size=200, add_intercept=False, total_eff=True)
+    results_tot_T_Andes_DJF_init = bootstrap_regression_yearwise(target_Andes_DJF_xr_init, drivers_DJF_xr_init, 't2m', drivers_DJF_tot, 
+                                                        n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+    results_tot_Pr_Andes_DJF_init = bootstrap_regression_yearwise(target_Andes_DJF_xr_init, drivers_DJF_xr_init, 'tp', drivers_DJF_tot, 
+                                                         n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+    results_tot_T_LP_DJF_init = bootstrap_regression_yearwise(target_LP_DJF_xr_init, drivers_DJF_xr_init, 't2m', drivers_DJF_tot,
+                                                     n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
+    results_tot_Pr_LP_DJF_init = bootstrap_regression_yearwise(target_LP_DJF_xr_init, drivers_DJF_xr_init, 'tp', drivers_DJF_tot, 
+                                                      n_boot=10000, sample_size=8, add_intercept=False, total_eff=True)
 
     # Plotting the total effects results for this specific init month
     plot_bootstrap_coefficients(results_tot_T_Andes_DJF_init, drivers_DJF_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects Andes T DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects Andes T DJF for Init Month {init_month}')
     plot_bootstrap_coefficients(results_tot_Pr_Andes_DJF_init, drivers_DJF_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects Andes Pr DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects Andes Pr DJF for Init Month {init_month}')
     plot_bootstrap_coefficients(results_tot_T_LP_DJF_init, drivers_DJF_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects La Plata T DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects La Plata T DJF for Init Month {init_month}')
     plot_bootstrap_coefficients(results_tot_Pr_LP_DJF_init, drivers_DJF_tot,
-                                title=f'Bootstrap regression coefficients \n Total Effects La Plata Pr DJF for Init Month {init_month}')
+                                title=f'Bootstrap regression coefficients yearwise \n Total Effects La Plata Pr DJF for Init Month {init_month}')
 
     #other links for this specific init month
-    results_IOBW_init = bootstrap_regression(drivers_DJF_xr_init, drivers_DJF_xr_init, 'IOBW', ['ENSO'], n_boot=10000, sample_size=200, add_intercept=False)
-    results_VB_init = bootstrap_regression(drivers_DJF_xr_init, drivers_DJF_xr_init, 'VB', ['ENSO', 'IOBW'], n_boot=10000, sample_size=200, add_intercept=False)
-    results_A_SAM_init = bootstrap_regression(drivers_DJF_xr_init, drivers_DJF_xr_init, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000, sample_size=200, add_intercept=False)
-    results_S_SAM_init = bootstrap_regression(drivers_DJF_xr_init, drivers_DJF_xr_init, 'S_SAM', ['ENSO','IOBW', 'VB'], n_boot=10000, sample_size=200, add_intercept=False)
+    results_IOBW_init = bootstrap_regression_yearwise(drivers_DJF_xr_init, drivers_DJF_xr_init, 'IOBW', ['ENSO'], n_boot=10000, sample_size=8, add_intercept=False)
+    results_VB_init = bootstrap_regression_yearwise(drivers_DJF_xr_init, drivers_DJF_xr_init, 'VB', ['ENSO', 'IOBW'], n_boot=10000, sample_size=8, add_intercept=False)
+    results_A_SAM_init = bootstrap_regression_yearwise(drivers_DJF_xr_init, drivers_DJF_xr_init, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000, sample_size=8, add_intercept=False)
+    results_S_SAM_init = bootstrap_regression_yearwise(drivers_DJF_xr_init, drivers_DJF_xr_init, 'S_SAM', ['ENSO','IOBW', 'VB'], n_boot=10000, sample_size=8, add_intercept=False)
 
-    plot_bootstrap_coefficients(results_IOBW_init, ['ENSO'], title=f'Bootstrap regression coefficients \n IOBW DJF for Init Month {init_month}')
-    plot_bootstrap_coefficients(results_VB_init, ['ENSO', 'IOBW'], title=f'Bootstrap regression coefficients \n VB DJF for Init Month {init_month}')
-    plot_bootstrap_coefficients(results_A_SAM_init, ['ENSO', 'IOBW'], title=f'Bootstrap regression coefficients \n A_SAM DJF for Init Month {init_month}')
-    plot_bootstrap_coefficients(results_S_SAM_init, ['ENSO', 'IOBW', 'VB'], title=f'Bootstrap regression coefficients \n S_SAM DJF for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_IOBW_init, ['ENSO'], title=f'Bootstrap regression coefficients yearwise \n IOBW DJF for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_VB_init, ['ENSO', 'IOBW'], title=f'Bootstrap regression coefficients yearwise \n VB DJF for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_A_SAM_init, ['ENSO', 'IOBW'], title=f'Bootstrap regression coefficients yearwise \n A_SAM DJF for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_S_SAM_init, ['ENSO', 'IOBW', 'VB'], title=f'Bootstrap regression coefficients yearwise \n S_SAM DJF for Init Month {init_month}')
 
 
     #compute IOBW and A-SAM regression also from no VB array
-    results_IOBW_no_VB_init = bootstrap_regression(drivers_DJF_xr_no_VB_init, drivers_DJF_xr_no_VB_init, 'IOBW', ['ENSO'], n_boot=10000, sample_size=200, add_intercept=False)
-    results_A_SAM_no_VB_init = bootstrap_regression(drivers_DJF_xr_no_VB_init, drivers_DJF_xr_no_VB_init, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000, sample_size=200, add_intercept=False)
+    results_IOBW_no_VB_init = bootstrap_regression_yearwise(drivers_DJF_xr_no_VB_init, drivers_DJF_xr_no_VB_init, 'IOBW', ['ENSO'], n_boot=10000, sample_size=8, add_intercept=False)
+    results_A_SAM_no_VB_init = bootstrap_regression_yearwise(drivers_DJF_xr_no_VB_init, drivers_DJF_xr_no_VB_init, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000, sample_size=8, add_intercept=False)
 
-    plot_bootstrap_coefficients(results_IOBW_no_VB_init, ['ENSO'], title=f'Bootstrap regression coefficients \n IOBW DJF (no VB) for Init Month {init_month}')
-    plot_bootstrap_coefficients(results_A_SAM_no_VB_init, ['ENSO', 'IOBW'], title=f'Bootstrap regression coefficients \n A_SAM DJF (no VB) for Init Month {init_month}')
-
-    
+    plot_bootstrap_coefficients(results_IOBW_no_VB_init, ['ENSO'], title=f'Bootstrap regression coefficients yearwise \n IOBW DJF (no VB) for Init Month {init_month}')
+    plot_bootstrap_coefficients(results_A_SAM_no_VB_init, ['ENSO', 'IOBW'], title=f'Bootstrap regression coefficients yearwise \n A_SAM DJF (no VB) for Init Month {init_month}')
 
     #overview figure for this specific init month
-    
+
     summer_driver_links_init=[results_IOBW_init['coef_ENSO'].mean(),
-                                 *[results_VB_init[f'coef_{var}'].mean() for var in ['ENSO', 'IOBW']],
-                                 *[results_A_SAM_init[f'coef_{var}'].mean() for var in ['ENSO', 'IOBW']],
-                                  *[results_S_SAM_init[f'coef_{var}'].mean() for var in ['ENSO', 'IOBW', 'VB']]]
-    
+                             *[results_VB_init[f'coef_{var}'].mean() for var in ['ENSO', 'IOBW']],
+                             *[results_A_SAM_init[f'coef_{var}'].mean() for var in ['ENSO', 'IOBW']],
+                              *[results_S_SAM_init[f'coef_{var}'].mean() for var in ['ENSO', 'IOBW', 'VB']]]
+
     mod_dict_DJF_init = transform_reg_lists(
-                 summer_driver_links_init,
-                 driver_target_list_DJF,
-                 mod_dict_DJF, copy_ind=False)
-    
-       
+             summer_driver_links_init,
+             driver_target_list_DJF,
+             mod_dict_DJF, copy_ind=False
+         )
+
+   
     target_reg_coef_list_DJF_init=[mean_from_df(results_direct_T_Andes_DJF_init, drivers_DJF), 
-                                       mean_from_df(results_direct_Pr_Andes_DJF_init, drivers_DJF),
-                                       mean_from_df(results_direct_T_LP_DJF_init, drivers_DJF), 
-                                       mean_from_df(results_direct_Pr_LP_DJF_init, drivers_DJF)]
-    
+                                   mean_from_df(results_direct_Pr_Andes_DJF_init, drivers_DJF),
+                                   mean_from_df(results_direct_T_LP_DJF_init, drivers_DJF), 
+                                   mean_from_df(results_direct_Pr_LP_DJF_init, drivers_DJF)]
+
     d_DJF_init={}
     for i in range(len(target_vars)):
-            target_tuple_list_DJF=[(driver, target_vars[i]) for driver in drivers_DJF]
-           
-            DJF_target_dict_init=transform_reg_lists(target_reg_coef_list_DJF_init[i], target_tuple_list_DJF, mod_dict_DJF_init)
-            d_DJF_init[target_vars[i]]= DJF_target_dict_init    
-    
+        target_tuple_list_DJF=[(driver, target_vars[i]) for driver in drivers_DJF]
+       
+        DJF_target_dict_init=transform_reg_lists(target_reg_coef_list_DJF_init[i], target_tuple_list_DJF, mod_dict_DJF_init)
+        d_DJF_init[target_vars[i]]= DJF_target_dict_init    
+
     network_data_list_init=list(d_DJF_init.values())
-    plot_causal_networks_grid_flexible(network_data_list_init, positions_list[4:], title_list, 
-                                           row_labels=['DJF'], heading_add=f'Hindcast mean DJF coefficients for Init Month {init_month}')
+    plot_causal_networks_grid_flexible(network_data_list_init, positions_list[4:9], title_list, row_labels=['DJF'], heading_add=f'Hindcast mean yearwise DJF coefficients for Init Month {init_month}')
 
 print('Finished DJF stratified by init month!')
 

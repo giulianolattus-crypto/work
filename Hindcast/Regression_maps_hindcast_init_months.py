@@ -489,12 +489,12 @@ print(target_SON_xr.sizes)
 print('Spring aligned!')
 
 #summer
-#slightly different approach here due to init month restriction
+#slightly different approach here due to for Init month restriction
 init_sel = np.intersect1d(
     np.unique(VB_DJF_xr.init_month.values),
     np.unique(target_DJF_xr.init_month.values)
 )
-print('Init months in all necessary Arrays')
+print('for Init months in all necessary Arrays')
 print(init_sel)
 
 djf_list = [
@@ -905,8 +905,8 @@ cmap_std=plt.cm.managua
 cmap_r2=plt.cm.PuOr
 
 for init_month in np.unique(target_SON_xr.init_month.values):
-    print(f'Init month {init_month} SON maps start!')
-    #select values in target and driver array associated solely with this init month
+    print(f'for Init month {init_month} SON maps start!')
+    #select values in target and driver array associated solely with this for Init month
     target_SON_xr_init=target_SON_xr.where(target_SON_xr.init_month==init_month, drop=True)
     drivers_SON_xr_init=drivers_SON_xr.where(drivers_SON_xr.init_month==init_month, drop=True)
 
@@ -920,12 +920,12 @@ for init_month in np.unique(target_SON_xr.init_month.values):
                                                             sample_size=8, total_eff=True)
     #Coef maps
     subplots_map(ds=coef_SON_precip_direct, title_list=driver_vars_SON, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Precipitation SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Precipitation SON for Init  {init_month}',
                     stations=None, BF=significant_SON_precip_direct)
     plt.close()
 
     subplots_map(ds=coef_SON_precip_total, title_list=driver_vars_tot, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Precipitation Total SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Precipitation Total SON for Init  {init_month}',
                     stations=None, BF=significant_SON_precip_total)
     plt.close()
 
@@ -933,25 +933,25 @@ for init_month in np.unique(target_SON_xr.init_month.values):
 
 
     subplots_map(ds=std_SON_precip_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Precipitation SON Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Precipitation SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=std_SON_precip_total, title_list=driver_vars_tot, cmap=cmap_std, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Precipitation Total SON Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Precipitation Total SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     #R2 precip SON maps
 
     subplots_map(ds=r2_SON_precip_direct, title_list=driver_vars_SON, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Precipitation SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Precipitation SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
 
     subplots_map(ds=r2_SON_precip_total, title_list=driver_vars_tot, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Precipitation Total SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Precipitation Total SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
@@ -966,35 +966,35 @@ for init_month in np.unique(target_SON_xr.init_month.values):
                                                             sample_size=8, total_eff=True)
 
     subplots_map(ds=coef_SON_temp_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Temperature SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Temperature SON for Init  {init_month}',
                     stations=None, BF=significant_SON_temp_direct)
     plt.close()
 
     subplots_map(ds=coef_SON_temp_total, title_list=driver_vars_tot, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Temperature Total SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Temperature Total SON for Init  {init_month}',
                     stations=None, BF=significant_SON_temp_total)
     plt.close()
 
     #Std maps
     subplots_map(ds=std_SON_temp_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Temperature SON Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Temperature SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=std_SON_temp_total, title_list=driver_vars_tot, cmap=cmap_std, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Temperature Total SON Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Temperature Total SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     #R2 Temp maps
 
     subplots_map(ds=r2_SON_temp_direct, title_list=driver_vars_SON, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Temperature SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Temperature SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=r2_SON_temp_total, title_list=driver_vars_tot, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Temperature Total SON Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Temperature Total SON for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
@@ -1008,8 +1008,8 @@ driver_vars_DJF = ["ENSO", "IOBW", 'VB', 'A_SAM', 'S_SAM']
 driver_vars_tot_DJF=['ENSO', 'IOBW', 'VB']
 
 for init_month in np.unique(target_DJF_xr.init_month.values):
-    print(f'Init month {init_month} DJF maps start!')
-    #select values in target and driver array associated solely with this init month
+    print(f'for Init month {init_month} DJF maps start!')
+    #select values in target and driver array associated solely with this for Init month
     target_DJF_xr_init=target_DJF_xr.where(target_DJF_xr.init_month==init_month, drop=True)
     drivers_DJF_xr_init=drivers_DJF_xr.where(drivers_DJF_xr.init_month==init_month, drop=True)
 
@@ -1023,32 +1023,32 @@ for init_month in np.unique(target_DJF_xr.init_month.values):
                                                             sample_size=8, total_eff=True)
 
     subplots_map(ds=coef_DJF_precip_direct, title_list=driver_vars_DJF, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Precipitation DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Precipitation DJF for Init  {init_month}',
                     stations=None, BF=significant_DJF_precip_direct)
     plt.close()
 
     subplots_map(ds=coef_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Precipitation Total DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Precipitation Total DJF for Init  {init_month}',
                     stations=None, BF=significant_DJF_precip_total)
     plt.close()
 
     subplots_map(ds=std_DJF_precip_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Precipitation DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Precipitation DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=std_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='mm', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Precipitation Total DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Precipitation Total DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=r2_DJF_precip_direct, title_list=driver_vars_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Precipitation DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Precipitation DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=r2_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Precipitation Total DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Precipitation Total DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
@@ -1063,32 +1063,32 @@ for init_month in np.unique(target_DJF_xr.init_month.values):
                                                             sample_size=8, total_eff=True)
 
     subplots_map(ds=coef_DJF_temp_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Temperature DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Temperature DJF for Init  {init_month}',
                     stations=None, BF=significant_DJF_temp_direct)
     plt.close()
 
     subplots_map(ds=coef_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Mean regression coefficients Temperature Total DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean regression coefficients Temperature Total DJF for Init  {init_month}',
                     stations=None, BF=significant_DJF_temp_total)
     plt.close()
 
     subplots_map(ds=std_DJF_temp_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Temperature DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Temperature DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=std_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='K', steps=0.1, \
-                    cbar_each=None, heading=f'Std regression coefficients Temperature Total DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Std regression coefficients Temperature Total DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=r2_DJF_temp_direct, title_list=driver_vars_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Temperature DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Temperature DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
     subplots_map(ds=r2_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=cmap_r2, unit=' ', steps=0.1, \
-                    cbar_each=None, heading=f'Mean R2 Temperature Total DJF Init: {init_month}',
+                    cbar_each=None, heading=f'Mean R2 Temperature Total DJF for Init  {init_month}',
                     stations=None, R2_plot=True)
     plt.close()
 
