@@ -832,7 +832,7 @@ def plot_bootstrap_coefficients(results, driver_vars, title="Bootstrap regressio
     axes[0].set_ylabel("Count", fontsize=fsize)
     fig.suptitle(title, fontsize=fsize+4, fontweight='heavy', y=1.1)
     fig.tight_layout()
-    fig.savefig('Histograms/'+title.replace(" ", "_")+".jpg", dpi=300, bbox_inches='tight')
+    fig.savefig('Histograms/'+title.replace(" ", "_").replace("(", "").replace(")", "").replace("\n", "")+".jpg", dpi=300, bbox_inches='tight')
     plt.show()
 
 #####################################################################################
@@ -858,7 +858,7 @@ results_direct_Pr_LP_SON_1000=bootstrap_regression(target_LP_SON_xr, drivers_SON
 
 for i, element in enumerate([results_direct_T_Andes_SON_1000, results_direct_Pr_Andes_SON_1000, results_direct_T_LP_SON_1000, results_direct_Pr_LP_SON_1000]):
     plot_bootstrap_coefficients(element, drivers_SON,
-                                title=f'Bootstrap regression coefficients \n {heading_list[i]}', 
+                                title=f'Bootstrap regression coefficients \n {heading_list[i]} SON', 
                                 era5_vals=era5_val_direct_list[i])
     
 #total effects on T and precip in both regions
@@ -877,7 +877,7 @@ results_tot_Pr_LP_SON_1000=bootstrap_regression(target_LP_SON_xr, drivers_SON_xr
 
 for i, element in enumerate([results_tot_T_Andes_SON_1000, results_tot_Pr_Andes_SON_1000, results_tot_T_LP_SON_1000, results_tot_Pr_LP_SON_1000]):
     plot_bootstrap_coefficients(element, drivers_SON_tot, 
-                                title=f'Bootstrap regression coefficients \n Total effects '+ f' {heading_list[i]}',
+                                title=f'Bootstrap regression coefficients \n Total effects '+ f' {heading_list[i]} SON',
                                 era5_vals=era5_val_total_list[i])
 
 #other SON links
@@ -894,13 +894,13 @@ results_S_SAM_1000=bootstrap_regression(drivers_SON_xr, drivers_SON_xr, 'S_SAM',
                                       add_intercept=False
                                       )
 
-plot_bootstrap_coefficients(results_IOD_1000, ['ENSO'], title='Bootstrap regression coefficients \n IOD',
+plot_bootstrap_coefficients(results_IOD_1000, ['ENSO'], title='Bootstrap regression coefficients \n IOD SON',
                             era5_vals={'ENSO':0.55})
-plot_bootstrap_coefficients(results_SPV_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients \n SPV',
+plot_bootstrap_coefficients(results_SPV_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients \n SPV SON',
                             era5_vals={'ENSO':-0.08, 'IOD':0.05})
-plot_bootstrap_coefficients(results_A_SAM_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients \n A_SAM',
+plot_bootstrap_coefficients(results_A_SAM_1000, ['ENSO', 'IOD'], title='Bootstrap regression coefficients \n A_SAM SON',
                             era5_vals={'ENSO':-0.57, 'IOD':-0.25})
-plot_bootstrap_coefficients(results_S_SAM_1000, ['ENSO', 'IOD', 'SPV'], title='Bootstrap regression coefficients \n S_SAM',
+plot_bootstrap_coefficients(results_S_SAM_1000, ['ENSO', 'IOD', 'SPV'], title='Bootstrap regression coefficients \n S_SAM SON',
                             era5_vals={'ENSO':-0.05, 'IOD':-0.08, 'SPV':0.72})
 
 
@@ -927,7 +927,7 @@ results_direct_Pr_LP_DJF_1000=bootstrap_regression(target_LP_DJF_xr, drivers_DJF
 for i, element in enumerate([results_direct_T_Andes_DJF_1000, results_direct_Pr_Andes_DJF_1000, 
                              results_direct_T_LP_DJF_1000, results_direct_Pr_LP_DJF_1000]):
     plot_bootstrap_coefficients(element, drivers_DJF,
-                                title=f'Bootstrap regression coefficients \n {heading_list[i]}', 
+                                title=f'Bootstrap regression coefficients \n {heading_list[i]} DJF', 
                                 era5_vals=era5_val_direct_list[i])
 
 #total effects on T and precip in both regions
@@ -947,7 +947,7 @@ results_tot_Pr_LP_DJF_1000=bootstrap_regression(target_LP_DJF_xr, drivers_DJF_xr
 for i, element in enumerate([results_tot_T_Andes_DJF_1000, results_tot_Pr_Andes_DJF_1000,
                              results_tot_T_LP_DJF_1000, results_tot_Pr_LP_DJF_1000]):
     plot_bootstrap_coefficients(element, drivers_DJF_tot, 
-                                title=f'Bootstrap regression coefficients \n Total effects '+ f' {heading_list[i]}',
+                                title=f'Bootstrap regression coefficients \n Total effects '+ f' {heading_list[i]} DJF',
                                 era5_vals=era5_val_total_list[i])
 
 
@@ -969,7 +969,7 @@ era5_A_SAM_DJF={'ENSO':-0.44, 'IOBW':0.04}
 
 A_SAM_DJF_init9=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000,
                                     sample_size=200, add_intercept=False)
-plot_bootstrap_coefficients(A_SAM_DJF_init9, ['ENSO', 'IOBW'], title='Bootstrap reg coef for A-SAM DJF \n Init month: 9 +10',
+plot_bootstrap_coefficients(A_SAM_DJF_init9, ['ENSO', 'IOBW'], title='Bootstrap reg coef for A-SAM DJF \n Init 9 and 10',
                             era5_vals=era5_A_SAM_DJF)
 
 A_SAM_DJF_10000=bootstrap_regression(drivers_DJF_xr_no_VB, drivers_DJF_xr_no_VB, 'A_SAM', ['ENSO', 'IOBW'], n_boot=10000,
@@ -980,13 +980,13 @@ plot_bootstrap_coefficients(A_SAM_DJF_10000, ['ENSO', 'IOBW'], title='Bootstrap 
 era5_VB_DJF={'ENSO':-0.23,'IOBW':0.26}
 VB_DJF_init9=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'VB', ['ENSO', 'IOBW'], n_boot=10000,
                                     sample_size=200, add_intercept=False)
-plot_bootstrap_coefficients(VB_DJF_init9, ['ENSO', 'IOBW'], title='Bootstrap reg coef for VB DJF \n Init month: 9 +10', era5_vals=era5_VB_DJF)
+plot_bootstrap_coefficients(VB_DJF_init9, ['ENSO', 'IOBW'], title='Bootstrap reg coef for VB DJF \n Init 9 and 10', era5_vals=era5_VB_DJF)
 
 #S_SAM
 era5_S_SAM_DJF={'ENSO':-0.18, 'IOBW':0.1, 'VB':0.44}
 S_SAM_DJF_init9=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'S_SAM', ['ENSO', 'IOBW', 'VB'], n_boot=10000,
                                     sample_size=200, add_intercept=False)
-plot_bootstrap_coefficients(S_SAM_DJF_init9, ['ENSO', 'IOBW', 'VB'], title='Bootstrap reg coef for S-SAM DJF \n Init month: 9 +10', era5_vals=era5_S_SAM_DJF)
+plot_bootstrap_coefficients(S_SAM_DJF_init9, ['ENSO', 'IOBW', 'VB'], title='Bootstrap reg coef for S-SAM DJF \n Init 9 and 10', era5_vals=era5_S_SAM_DJF)
 
 print('Finished DJF mixing all!')
 

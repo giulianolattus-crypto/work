@@ -12,6 +12,7 @@ import cartopy.crs as ccrs
 
 
 
+
 PATH = '/climca/people/glattus/Hindcast_data_ready'
 
 def df_xr_prep(df):
@@ -972,6 +973,7 @@ subplots_map_circ(ds=r2_DJF_z500_direct, title_list=driver_vars_DJF, cmap=cmap_r
                   cbar_each=None, heading='Mean R2 Z500 DJF', R2_plot=True)
 plt.close()
 
+print(std_DJF_z500_direct)
 
 subplots_map_circ(ds=std_DJF_z500_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='gpm', steps=0.1,
                   cbar_each=None, heading='Std regression coefficient Z500 DJF', R2_plot=True)
