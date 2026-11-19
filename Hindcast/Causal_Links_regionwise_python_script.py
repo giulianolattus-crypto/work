@@ -835,6 +835,19 @@ def plot_bootstrap_coefficients(results, driver_vars, title="Bootstrap regressio
     fig.savefig('Histograms/'+title.replace(" ", "_").replace("(", "").replace(")", "").replace("\n", "")+".jpg", dpi=300, bbox_inches='tight')
     plt.show()
 
+def result_saver(driver_links_dict, describer, file_name):
+        results_SON_precip_direct=xr.Dataset(driver_links_dict)
+        results_SON_precip_direct.attrs['description']=describer
+
+        results_SON_precip_direct.attrs['n_boot']=100
+        results_SON_precip_direct.attrs['sample_size']=200
+
+        results_SON_precip_direct.to_netcdf('Boot_reg_results_files/'+file_name)
+        print(f"Succesfully saved to: {file_name}!")
+
+
+
+
 #####################################################################################
 #1. Mixing all init months and years
 ####################################################################################
@@ -893,6 +906,40 @@ results_A_SAM_1000=bootstrap_regression(drivers_SON_xr, drivers_SON_xr, 'A_SAM',
 results_S_SAM_1000=bootstrap_regression(drivers_SON_xr, drivers_SON_xr, 'S_SAM', ['ENSO','IOD', 'SPV'], n_boot=10000, sample_size=200, 
                                       add_intercept=False
                                       )
+
+
+def save_prepper(results_dict, driver_list, filename):
+	for target, results in results_dict.items():
+		mean_values=[]
+		std_values=[]
+		labels=[]
+		lower_values=[]
+		upper_values=[]
+		for var in driver_list:
+			if f'coef_{var}' not in results.data_vars:
+				print('Skipping {var}: not found!')
+				continue
+
+			mean = results[f"coef_{var}"].mean()
+			std = results[f"coef_{var}"].std()
+			lower = np.nanpercentile(results[f'coef_{var}'], 2.5)
+			upper = np.nanpercentile(results[f'coef_{var}'], 97.5)
+			mean_values.append(mean)
+			std_values.append(std)
+			lower_values.append(lower)
+			upper_values.append(upper)
+			labels.append(f"{var}_{target}")
+
+	stats=xr.Dataset({'mean_coef':('driver_target', mean_values), 'std_coef':('driver_target', std_values),'lower25_coef':('driver_target', lower_values),'upper25_coef':('driver_target', upper_values)},
+				coords={'driver_target':labels})
+
+	stats.to_netcdf('Boot_reg_results_files/'+filename)
+
+
+	return stats
+
+results_SON_dict={'IOD':results_IOD_1000, 'SPV':results_SPV_1000, 'A_SAM':results_A_SAM_1000, 'S_SAM':results_S_SAM_1000}
+stats_driver_links_SON=save_prepper(results_SON_dict, drivers_SON_tot, 'driver_links_SON.nc')
 
 plot_bootstrap_coefficients(results_IOD_1000, ['ENSO'], title='Bootstrap regression coefficients \n IOD SON',
                             era5_vals={'ENSO':0.55})
@@ -987,6 +1034,11 @@ era5_S_SAM_DJF={'ENSO':-0.18, 'IOBW':0.1, 'VB':0.44}
 S_SAM_DJF_init9=bootstrap_regression(drivers_DJF_xr, drivers_DJF_xr, 'S_SAM', ['ENSO', 'IOBW', 'VB'], n_boot=10000,
                                     sample_size=200, add_intercept=False)
 plot_bootstrap_coefficients(S_SAM_DJF_init9, ['ENSO', 'IOBW', 'VB'], title='Bootstrap reg coef for S-SAM DJF \n Init 9 and 10', era5_vals=era5_S_SAM_DJF)
+
+
+
+results_DJF_dict={'IOBW':IOBW_DJF_1000, 'VB':VB_DJF_init9, 'A_SAM':A_SAM_DJF_init9, 'S_SAM':S_SAM_DJF_init9}
+stats_driver_links_DJF=save_prepper(results_DJF_dict, drivers_DJF_tot, 'driver_links_DJF.nc')
 
 print('Finished DJF mixing all!')
 

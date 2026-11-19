@@ -897,6 +897,17 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
 
     return r2_mean, coef_mean, coef_std, significant
 
+def result_saver(r2, mean, std, significant, describer, file_name):
+	results_SON_precip_direct=xr.Dataset({'R2':r2, 'Coef_mean':mean, 'Coef_std':std, 'Significant':significant})
+	results_SON_precip_direct.attrs['description']=describer
+
+	results_SON_precip_direct.attrs['n_boot']=100
+	results_SON_precip_direct.attrs['sample_size']=200
+
+	results_SON_precip_direct.to_netcdf('Boot_reg_results_files/'+file_name)
+	print(f"Succesfully saved to: {file_name}!")
+
+
 #spring regressions
 driver_vars_SON = ["ENSO", "IOD", 'SPV', 'A_SAM', 'S_SAM']
 driver_vars_tot=['ENSO', 'IOD', 'SPV']
@@ -904,18 +915,29 @@ driver_vars_tot=['ENSO', 'IOD', 'SPV']
 #Precip SON direct effect
 r2_SON_precip_direct, coef_SON_precip_direct, std_SON_precip_direct, significant_SON_precip_direct=bootstrap_map(target_SON_xr, drivers_SON_xr, 
                                                            driver_vars_SON, target_var='tp', n_boot=100, 
-                                                        sample_size=8, total_eff=False)
+
+                                                        sample_size=200, total_eff=False)
+
+results_SON_precip_direct=result_saver(r2_SON_precip_direct, coef_SON_precip_direct, std_SON_precip_direct, significant_SON_precip_direct,\
+ describer='Bootstrap reg results SON Precip direct effects map', file_name='boot_reg_results_map_SON_precip_direct.nc')
+print(results_SON_precip_direct)
+
 #Precip SON total effect
 r2_SON_precip_total, coef_SON_precip_total, std_SON_precip_total, significant_SON_precip_total=bootstrap_map(target_SON_xr, drivers_SON_xr,
                                                            driver_vars_tot, target_var='tp', n_boot=100,
-                                                        sample_size=8, total_eff=True)
+                                                        sample_size=200, total_eff=True)
+
+
+results_SON_precip_total=result_saver(r2_SON_precip_total, coef_SON_precip_total, std_SON_precip_total, significant_SON_precip_total,\
+ describer='Bootstrap reg results SON Precip total effects map', file_name='boot_reg_results_map_SON_precip_total.nc')
+
 #Coef maps
-subplots_map(ds=coef_SON_precip_direct, title_list=driver_vars_SON, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
+subplots_map(ds=coef_SON_precip_direct, title_list=driver_vars_SON, cmap=plt.cm.BrBG, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Precipitation SON',
                    stations=None, BF=significant_SON_precip_direct)
 plt.close()
 
-subplots_map(ds=coef_SON_precip_total, title_list=driver_vars_tot, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
+subplots_map(ds=coef_SON_precip_total, title_list=driver_vars_tot, cmap=plt.cm.BrBG, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Precipitation Total SON',
                    stations=None, BF=significant_SON_precip_total)
 plt.close()
@@ -923,12 +945,12 @@ plt.close()
 #Std maps
 
 cmap_std=plt.cm.managua
-subplots_map(ds=std_SON_precip_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='mm', steps=0.1, \
+subplots_map(ds=std_SON_precip_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation SON',
                    stations=None, R2_plot=True)
 plt.close()
 
-subplots_map(ds=std_SON_precip_total, title_list=driver_vars_tot, cmap=cmap_std, unit='mm', steps=0.1, \
+subplots_map(ds=std_SON_precip_total, title_list=driver_vars_tot, cmap=cmap_std, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation Total SON',
                    stations=None, R2_plot=True)
 plt.close()
@@ -950,29 +972,39 @@ print('Precip SON maps done!')
 
 r2_SON_temp_direct, coef_SON_temp_direct, std_SON_temp_direct, significant_SON_temp_direct=bootstrap_map(target_SON_xr, drivers_SON_xr, 
                                                        driver_vars_SON, target_var='t2m', n_boot=100,
-                                                         sample_size=8, total_eff=False)
+                                                         sample_size=200, total_eff=False)
+
+
+results_SON_temp_direct=result_saver(r2_SON_temp_direct, coef_SON_temp_direct, std_SON_temp_direct, significant_SON_temp_direct,\
+ describer='Bootstrap reg results SON Temp direct effects map', file_name='boot_reg_results_map_SON_temp_direct.nc')
 
 r2_SON_temp_total, coef_SON_temp_total, std_SON_temp_total, significant_SON_temp_total=bootstrap_map(target_SON_xr, drivers_SON_xr,
                                                      driver_vars_tot, target_var='t2m', n_boot=100,
-                                                        sample_size=8, total_eff=True)
+                                                        sample_size=200, total_eff=True)
 
-subplots_map(ds=coef_SON_temp_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+
+results_SON_temp_total=result_saver(r2_SON_temp_total, coef_SON_temp_total, std_SON_temp_total, significant_SON_temp_total,\
+ describer='Bootstrap reg results SON Temp total effects map', file_name='boot_reg_results_map_SON_temp_total.nc')
+
+
+
+subplots_map(ds=coef_SON_temp_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Temperature SON',
                    stations=None, BF=significant_SON_temp_direct)
 plt.close()
 
-subplots_map(ds=coef_SON_temp_total, title_list=driver_vars_tot, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+subplots_map(ds=coef_SON_temp_total, title_list=driver_vars_tot, cmap=plt.cm.RdBu_r, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Temperature Total SON',
                    stations=None, BF=significant_SON_temp_total)
 plt.close()
 
 #Std maps
-subplots_map(ds=std_SON_temp_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='K', steps=0.1, \
+subplots_map(ds=std_SON_temp_direct, title_list=driver_vars_SON, cmap=cmap_std, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature SON',
                    stations=None, R2_plot=True)
 plt.close()
 
-subplots_map(ds=std_SON_temp_total, title_list=driver_vars_tot, cmap=cmap_std, unit='K', steps=0.1, \
+subplots_map(ds=std_SON_temp_total, title_list=driver_vars_tot, cmap=cmap_std, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature Total SON',
                    stations=None, R2_plot=True)
 plt.close()
@@ -1001,28 +1033,36 @@ driver_vars_tot_DJF=['ENSO', 'IOBW', 'VB']
 #Precip DJF direct effect
 r2_DJF_precip_direct, coef_DJF_precip_direct, std_DJF_precip_direct, significant_DJF_precip_direct=bootstrap_map(target_DJF_xr, drivers_DJF_xr, 
                                                            driver_vars_DJF, target_var='tp', n_boot=100, 
-                                                        sample_size=8, total_eff=False)
+                                                        sample_size=200, total_eff=False)
 #Precip DJF total effect
 r2_DJF_precip_total, coef_DJF_precip_total, std_DJF_precip_total, significant_DJF_precip_total=bootstrap_map(target_DJF_xr, drivers_DJF_xr,
                                                            driver_vars_tot_DJF, target_var='tp', n_boot=100,
-                                                        sample_size=8, total_eff=True)
+                                                        sample_size=200, total_eff=True)
 
-subplots_map(ds=coef_DJF_precip_direct, title_list=driver_vars_DJF, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
+
+results_DJF_precip_direct=result_saver(r2_DJF_precip_direct,  coef_DJF_precip_direct, std_DJF_precip_direct, significant_DJF_precip_direct,\
+ describer='Bootstrap reg results DJF Precip direct effects map', file_name='boot_reg_results_map_DJF_precip_direct.nc')
+
+results_DJF_precip_total=result_saver(r2_DJF_precip_total,  coef_DJF_precip_total, std_DJF_precip_total, significant_DJF_precip_total,\
+ describer='Bootstrap reg results DJF Precip total effects map', file_name='boot_reg_results_map_DJF_precip_total.nc')
+
+
+subplots_map(ds=coef_DJF_precip_direct, title_list=driver_vars_DJF, cmap=plt.cm.BrBG, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Precipitation DJF',
                    stations=None, BF=significant_DJF_precip_direct)
 plt.close()
 
-subplots_map(ds=coef_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
+subplots_map(ds=coef_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.BrBG, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Precipitation Total DJF',
                    stations=None, BF=significant_DJF_precip_total)
 plt.close()
 
-subplots_map(ds=std_DJF_precip_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='mm', steps=0.1, \
+subplots_map(ds=std_DJF_precip_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation DJF',
                    stations=None, R2_plot=True)
 plt.close()
 
-subplots_map(ds=std_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='mm', steps=0.1, \
+subplots_map(ds=std_DJF_precip_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='mm/$\sigma$ mm', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Precipitation Total DJF',
                    stations=None, R2_plot=True)
 plt.close()
@@ -1041,28 +1081,37 @@ print('Precip DJF maps done!')
 
 r2_DJF_temp_direct, coef_DJF_temp_direct, std_DJF_temp_direct, significant_DJF_temp_direct=bootstrap_map(target_DJF_xr, drivers_DJF_xr, 
                                                        driver_vars_DJF, target_var='t2m', n_boot=100,
-                                                         sample_size=8, total_eff=False)
+                                                         sample_size=200, total_eff=False)
 
 r2_DJF_temp_total, coef_DJF_temp_total, std_DJF_temp_total, significant_DJF_temp_total=bootstrap_map(target_DJF_xr, drivers_DJF_xr,
                                                      driver_vars_tot_DJF, target_var='t2m', n_boot=100,
-                                                        sample_size=8, total_eff=True)
+                                                        sample_size=200, total_eff=True)
 
-subplots_map(ds=coef_DJF_temp_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+
+results_DJF_temp_direct=result_saver(r2_DJF_temp_direct,  coef_DJF_temp_direct, std_DJF_temp_direct, significant_DJF_temp_direct,\
+ describer='Bootstrap reg results DJF Temp direct effects map', file_name='boot_reg_results_map_DJF_temp_direct.nc')
+
+results_DJF_temp_total=result_saver(r2_DJF_temp_total,  coef_DJF_temp_total, std_DJF_temp_total, significant_DJF_temp_total,\
+ describer='Bootstrap reg results DJF Temp total effects map', file_name='boot_reg_results_map_DJF_temp_total.nc')
+
+
+
+subplots_map(ds=coef_DJF_temp_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Temperature DJF',
                    stations=None, BF=significant_DJF_temp_direct)
 plt.close()
 
-subplots_map(ds=coef_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
+subplots_map(ds=coef_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=plt.cm.RdBu_r, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Mean regression coefficients Temperature Total DJF',
                    stations=None, BF=significant_DJF_temp_total)
 plt.close()
 
-subplots_map(ds=std_DJF_temp_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='K', steps=0.1, \
+subplots_map(ds=std_DJF_temp_direct, title_list=driver_vars_DJF, cmap=cmap_std, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature DJF',
                    stations=None, R2_plot=True)
 plt.close()
 
-subplots_map(ds=std_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='K', steps=0.1, \
+subplots_map(ds=std_DJF_temp_total, title_list=driver_vars_tot_DJF, cmap=cmap_std, unit='K/$\sigma$ K', steps=0.1, \
                  cbar_each=None, heading='Std regression coefficients Temperature Total DJF',
                    stations=None, R2_plot=True)
 plt.close()
