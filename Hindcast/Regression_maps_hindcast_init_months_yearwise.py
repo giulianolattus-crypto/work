@@ -997,9 +997,15 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
 
     # | is the or operator 
     # use 95% CI (is more strict than 80%)
-    significant = (prob_positive >= 0.95) | (prob_negative >= 0.95)
-
-    significant=significant.transpose('driver', 'latitude', 'longitude')
+    
+    lower=coef.quantile(0.025, dim='bootstrap', skipna=True)
+    upper=coef.quantile(0.975, dim='bootstrap', skipna=True)
+    
+    #significant = (prob_positive >= 0.95) | (prob_negative >= 0.95)
+    excluding_0= (lower>0) | (upper<0)
+    #print(sum(significant), sum(excluding_0))
+    #print(significant==excluding_0)
+    significant=excluding_0.transpose('driver', 'latitude', 'longitude')
 
     r2_mean=r2_mean.compute()
     coef_mean=coef_mean.compute()

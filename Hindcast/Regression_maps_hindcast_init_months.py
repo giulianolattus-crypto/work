@@ -886,9 +886,14 @@ def bootstrap_map(target_xr,drivers_combi_xr, driver_vars, target_var, n_boot=5,
 
     # | is the or operator 
     # use 95% CI (is more strict than 80%)
-    significant = (prob_positive >= 0.95) | (prob_negative >= 0.95)
+    lower=coef.quantile(0.025, dim='bootstrap', skipna=True)
+    upper=coef.quantile(0.975, dim='bootstrap', skipna=True)
 
-    significant=significant.transpose('driver', 'latitude', 'longitude')
+    #significant = (prob_positive >= 0.95) | (prob_negative >= 0.95)
+    excluding_0= (lower>0) | (upper<0)
+    #print(sum(significant), sum(excluding_0))
+    #print(significant==excluding_0)
+    significant=excluding_0.transpose('driver', 'latitude', 'longitude')
 
     r2_mean=r2_mean.compute()
     coef_mean=coef_mean.compute()
@@ -913,11 +918,11 @@ for init_month in np.unique(target_SON_xr.init_month.values):
     #Precip SON direct effect
     r2_SON_precip_direct, coef_SON_precip_direct, std_SON_precip_direct, significant_SON_precip_direct=bootstrap_map(target_SON_xr_init, drivers_SON_xr_init, 
                                                             driver_vars_SON, target_var='tp', n_boot=100, 
-                                                            sample_size=8, total_eff=False)
+                                                            sample_size=200, total_eff=False)
     #Precip SON total effect
     r2_SON_precip_total, coef_SON_precip_total, std_SON_precip_total, significant_SON_precip_total=bootstrap_map(target_SON_xr_init, drivers_SON_xr_init,
                                                             driver_vars_tot, target_var='tp', n_boot=100,
-                                                            sample_size=8, total_eff=True)
+                                                            sample_size=200, total_eff=True)
     #Coef maps
     subplots_map(ds=coef_SON_precip_direct, title_list=driver_vars_SON, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
                     cbar_each=None, heading=f'Mean regression coefficients Precipitation SON for Init  {init_month}',
@@ -959,11 +964,11 @@ for init_month in np.unique(target_SON_xr.init_month.values):
 
     r2_SON_temp_direct, coef_SON_temp_direct, std_SON_temp_direct, significant_SON_temp_direct=bootstrap_map(target_SON_xr_init, drivers_SON_xr_init, 
                                                         driver_vars_SON, target_var='t2m', n_boot=100,
-                                                            sample_size=8, total_eff=False)
+                                                            sample_size=200, total_eff=False)
 
     r2_SON_temp_total, coef_SON_temp_total, std_SON_temp_total, significant_SON_temp_total=bootstrap_map(target_SON_xr_init, drivers_SON_xr_init,
                                                         driver_vars_tot, target_var='t2m', n_boot=100,
-                                                            sample_size=8, total_eff=True)
+                                                            sample_size=200, total_eff=True)
 
     subplots_map(ds=coef_SON_temp_direct, title_list=driver_vars_SON, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
                     cbar_each=None, heading=f'Mean regression coefficients Temperature SON for Init  {init_month}',
@@ -1016,11 +1021,11 @@ for init_month in np.unique(target_DJF_xr.init_month.values):
     #Precip DJF direct effect
     r2_DJF_precip_direct, coef_DJF_precip_direct, std_DJF_precip_direct, significant_DJF_precip_direct=bootstrap_map(target_DJF_xr_init, drivers_DJF_xr_init, 
                                                             driver_vars_DJF, target_var='tp', n_boot=100, 
-                                                            sample_size=8, total_eff=False)
+                                                            sample_size=200, total_eff=False)
     #Precip DJF total effect
     r2_DJF_precip_total, coef_DJF_precip_total, std_DJF_precip_total, significant_DJF_precip_total=bootstrap_map(target_DJF_xr_init, drivers_DJF_xr_init,
                                                             driver_vars_tot_DJF, target_var='tp', n_boot=100,
-                                                            sample_size=8, total_eff=True)
+                                                            sample_size=200, total_eff=True)
 
     subplots_map(ds=coef_DJF_precip_direct, title_list=driver_vars_DJF, cmap=plt.cm.BrBG, unit='mm', steps=0.1, \
                     cbar_each=None, heading=f'Mean regression coefficients Precipitation DJF for Init  {init_month}',
@@ -1056,11 +1061,11 @@ for init_month in np.unique(target_DJF_xr.init_month.values):
 
     r2_DJF_temp_direct, coef_DJF_temp_direct, std_DJF_temp_direct, significant_DJF_temp_direct=bootstrap_map(target_DJF_xr_init, drivers_DJF_xr_init, 
                                                         driver_vars_DJF, target_var='t2m', n_boot=100,
-                                                            sample_size=8, total_eff=False)
+                                                            sample_size=200, total_eff=False)
 
     r2_DJF_temp_total, coef_DJF_temp_total, std_DJF_temp_total, significant_DJF_temp_total=bootstrap_map(target_DJF_xr_init, drivers_DJF_xr_init,
                                                         driver_vars_tot_DJF, target_var='t2m', n_boot=100,
-                                                            sample_size=8, total_eff=True)
+                                                            sample_size=200, total_eff=True)
 
     subplots_map(ds=coef_DJF_temp_direct, title_list=driver_vars_DJF, cmap=plt.cm.RdBu_r, unit='K', steps=0.1, \
                     cbar_each=None, heading=f'Mean regression coefficients Temperature DJF for Init  {init_month}',
